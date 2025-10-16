@@ -5,7 +5,7 @@ CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 default_key_bindings_goto="C-f"
 default_width=55
 default_height=10
-defautl_without_prefix=false
+defautl_without_prefix=true
 defautl_search_session_only=false
 
 tmux_option_goto="@fzf-goto-session"

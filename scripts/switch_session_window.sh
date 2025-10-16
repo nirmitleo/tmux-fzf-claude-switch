@@ -8,7 +8,9 @@ function main {
   local query
   local sess_arr
   local retval
-  sessions=$(tmux list-windows -a | 
+  sessions=$(tmux list-windows -a -F "#{session_name}:#{window_index}|#{window_name}|#{pane_title}|#{window_width}x#{window_height}" | \
+    grep '|claude|' | \
+    awk -F'|' '{gsub(/:.*/, "", $1); print $1 ": " $3 " [" $4 "]"}' | \
     fzf --exit-0 --print-query --reverse)
   retval=$?
 
