@@ -8,8 +8,8 @@ default_height=20
 default_without_prefix=true
 default_search_session_only=false
 
-tmux_option_goto="@fzf-goto-session"
-tmux_option_goto_without_prefix="@fzf-goto-session-without-prefix"
+tmux_claude_option_goto="@fzf-goto-session"
+tmux_claude_option_goto_without_prefix="@fzf-goto-session-without-prefix"
 tmux_option_width="@fzf-goto-win-width"
 tmux_option_height="@fzf-goto-win-height"
 tmux_option_search_session_only="@fzf-goto-session-only"
@@ -26,8 +26,8 @@ get_tmux_option() {
 }
 
 function set_goto_session_bindings {
-	local key_bindings=$(get_tmux_option "$tmux_option_goto" "$default_key_bindings_goto")
-	local without_prefix=$(get_tmux_option "$tmux_option_goto_without_prefix" "$default_without_prefix")
+	local key_bindings=$(get_tmux_option "$tmux_claude_option_goto" "$default_key_bindings_goto")
+	local without_prefix=$(get_tmux_option "$tmux_claude_option_goto_without_prefix" "$default_without_prefix")
 	local width=$(get_tmux_option "$tmux_option_width" "$default_width")
 	local height=$(get_tmux_option "$tmux_option_height" "$default_height")
 	local search_session_only=$(get_tmux_option "$tmux_option_search_session_only" "$default_search_session_only")
