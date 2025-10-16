@@ -2,7 +2,7 @@
 
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-default_key_bindings_goto="C-F"
+default_key_bindings_goto="C-S-f"
 default_width=70
 default_height=20
 default_without_prefix=true
