@@ -6,13 +6,11 @@ default_key_bindings_goto="C-k"
 default_width=70
 default_height=20
 default_without_prefix=true
-default_search_session_only=false
 
 tmux_claude_option_goto="@fzf-claude-goto-session"
 tmux_claude_option_goto_without_prefix="@fzf-claude-goto-session-without-prefix"
 tmux_claude_option_width="@fzf-claude-goto-win-width"
 tmux_claude_option_height="@fzf-claude-goto-win-height"
-tmux_claude_option_search_session_only="@fzf-claude-goto-session-only"
 
 get_tmux_option() {
 	local option=$1
@@ -30,32 +28,17 @@ function set_goto_session_bindings {
 	local without_prefix=$(get_tmux_option "$tmux_claude_option_goto_without_prefix" "$default_without_prefix")
 	local width=$(get_tmux_option "$tmux_claude_option_width" "$default_width")
 	local height=$(get_tmux_option "$tmux_claude_option_height" "$default_height")
-	local search_session_only=$(get_tmux_option "$tmux_claude_option_search_session_only" "$default_search_session_only")
 
-	if [ "$search_session_only" = false ]; then
-		if [ "$without_prefix" = true ]; then
-			local key
-			for key in $key_bindings; do
-				tmux bind -n "$key" popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window.sh"
-			done
-		else
-			local key
-			for key in $key_bindings; do
-				tmux bind "$key" popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window.sh"
-			done
-		fi
+	if [ "$without_prefix" = true ]; then
+		local key
+		for key in $key_bindings; do
+			tmux bind -n "$key" popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh"
+		done
 	else
-		if [ "$without_prefix" = true ]; then
-			local key
-			for key in $key_bindings; do
-				tmux bind -n "$key" popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session.sh"
-			done
-		else
-			local key
-			for key in $key_bindings; do
-				tmux bind "$key" popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session.sh"
-			done
-		fi
+		local key
+		for key in $key_bindings; do
+			tmux bind "$key" popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh"
+		done
 	fi
 }
 

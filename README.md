@@ -4,14 +4,15 @@
 
 ## Features
 
-This is a customized tmux session/window switcher optimized for Claude Code workflows:
+This is a customized tmux session/window/pane switcher optimized for Claude Code workflows:
 
-1. **Claude-focused filtering**: Shows only windows named "claude" across all sessions
-2. **Clean display format**: `<session-name>: <pane-title> [dimensions]`
-   - Example: `dictaphone: ✳ Project Structure [215x56]`
-3. **No-prefix keybinding**: Default is `Ctrl+F` (no prefix required)
-4. **Fuzzy search** with fzf for fast navigation
-5. **Create new sessions** if the name doesn't exist
+1. **Claude-focused filtering**: Shows only panes in windows named "claude" across all sessions
+2. **Pane-level switching**: Switch directly to specific panes, not just windows
+3. **Clean display format**: `<session-name>:<window-index>:[<pane-index>]: <pane-title> [dimensions]`
+   - Example: `dictaphone:0:[1]: ✳ Project Structure [215x56]`
+4. **No-prefix keybinding**: Default is `Ctrl+K` (no prefix required)
+5. **Fuzzy search** with fzf for fast navigation
+6. **Create new sessions** if the name doesn't exist
 
 ### Why this fork?
 
@@ -23,16 +24,16 @@ This fork is specifically designed for Claude Code users who:
 
 ### Display Format
 
-The switcher shows windows in this format:
+The switcher shows panes in this format:
 ```
-<session-name>: <pane-title> [widthxheight]
+<session-name>:<window-index>:[<pane-index>]: <pane-title> [widthxheight]
 ```
 
 Example output:
 ```
-dictaphone: ✳ Project Structure [215x56]
-iv-pro-copilot-v45: take one [215x58]
-iv-pro-media-router: just-commands [215x56]
+dictaphone:0:[1]: ✳ Project Structure [215x56]
+iv-pro-copilot-v45:0:[0]: take one [215x58]
+iv-pro-media-router:1:[2]: just-commands [215x56]
 ```
 
 ## Requirements
@@ -46,10 +47,10 @@ iv-pro-media-router: just-commands [215x56]
 - Put `set -g @plugin 'yourusername/tmux-fzf-claude-switch'` into your tmux config
 - Use tpm to install this plugin. Default you can press `prefix + I` (`I` is
   `shift + i` = I)
-- **Default keybinding**: `Ctrl + F` (no prefix required)
-  - Press `Ctrl + F` to open the popup showing all "claude" windows
+- **Default keybinding**: `Ctrl + K` (no prefix required)
+  - Press `Ctrl + K` to open the popup showing all "claude" panes
   - Type to fuzzy search through the list
-  - Press Enter to switch to the selected window
+  - Press Enter to switch to the selected pane
 - If you type a name that doesn't exist, you will be prompted to create it.
 
 > If this name conflicts with another session name -> add a double/single quotes `'example'`
@@ -57,12 +58,6 @@ iv-pro-media-router: just-commands [215x56]
 ## Customize
 
 > 🫰Thanks to [@erikw](https://github.com/erikw)
-
-### Search session only
-
-```bash
-set-option -g @fzf-goto-session-only 'true'
-```
 
 ### Key binding
 
