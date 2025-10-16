@@ -1,30 +1,39 @@
-# TMUX FZF Session Switch
+# TMUX FZF Claude Window Switch
 
 ![preview img](/img/preview.png)
 
-## QnA
+## Features
 
-### Can do?
+This is a customized tmux session/window switcher optimized for Claude Code workflows:
 
-1. Session + window name fuzzy search and switch.
-2. Create a new session
+1. **Claude-focused filtering**: Shows only windows named "claude" across all sessions
+2. **Clean display format**: `<session-name>: <pane-title> [dimensions]`
+   - Example: `dictaphone: ✳ Project Structure [215x56]`
+3. **No-prefix keybinding**: Default is `Ctrl+F` (no prefix required)
+4. **Fuzzy search** with fzf for fast navigation
+5. **Create new sessions** if the name doesn't exist
 
-### Reason don't use this plugin?
+### Why this fork?
 
-1. [tmux-fzf](https://github.com/sainnhe/tmux-fzf) have more black magic.
-2. [tmux-fzf](https://github.com/sainnhe/tmux-fzf) have single shortcut for [switch session](https://github.com/sainnhe/tmux-fzf/issues/6) and many function [tmux-fzf](https://github.com/sainnhe/tmux-fzf) had.
+This fork is specifically designed for Claude Code users who:
+- Work with multiple tmux sessions running Claude
+- Want instant access to any Claude window across all sessions
+- Prefer a cleaner, more focused display showing only relevant windows
+- Need a fast, keyboard-driven workflow without prefix keys
 
-### Reason for using this plugin?
+### Display Format
 
-One single shortcut for switching sessions, windows, and creating new sessions. This makes simple flow, "i want to go to ? press shortcut type ? enter done.", "i want to go to ?, press shortcut type ?, Uh! not have that okay press enter to create new session with? name"
+The switcher shows windows in this format:
+```
+<session-name>: <pane-title> [widthxheight]
+```
 
-### Plan
-
-Blazingly fast Tmux workflow, built muscle memory, better DX.
-
-### Not in plan
-
-Becoming Chad, have super black magic power like [tmux-fzf](https://github.com/sainnhe/tmux-fzf)
+Example output:
+```
+dictaphone: ✳ Project Structure [215x56]
+iv-pro-copilot-v45: take one [215x58]
+iv-pro-media-router: just-commands [215x56]
+```
 
 ## Requirements
 
@@ -34,10 +43,13 @@ Becoming Chad, have super black magic power like [tmux-fzf](https://github.com/s
 ## Getting started
 
 - Install the [tpm](https://github.com/tmux-plugins/tpm) Tmux Plugin Manager.
-- Put `set -g @plugin 'brokenricefilms/tmux-fzf-session-switch'` into your tmux config
+- Put `set -g @plugin 'yourusername/tmux-fzf-claude-switch'` into your tmux config
 - Use tpm to install this plugin. Default you can press `prefix + I` (`I` is
   `shift + i` = I)
-- `Prefix + Ctrl + f`: Open up fzf in a new tab. (e.g. prefix = ctrl + b. Hold ctrl -> press b -> press f -> done)
+- **Default keybinding**: `Ctrl + F` (no prefix required)
+  - Press `Ctrl + F` to open the popup showing all "claude" windows
+  - Type to fuzzy search through the list
+  - Press Enter to switch to the selected window
 - If you type a name that doesn't exist, you will be prompted to create it.
 
 > If this name conflicts with another session name -> add a double/single quotes `'example'`
@@ -66,8 +78,10 @@ set -g @fzf-goto-session 's'
 
 #### Without prefix
 
+The default is now `true` (no prefix required). To require a prefix:
+
 ```bash
-set -g @fzf-goto-session-without-prefix 'true'
+set -g @fzf-goto-session-without-prefix 'false'
 ```
 
 ### Window dimensions
