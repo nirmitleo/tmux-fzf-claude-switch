@@ -3,6 +3,7 @@
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 function main {
+  local filter_name="${1:-claude}"
   local sessions
   local query
   local sess_arr
@@ -11,7 +12,7 @@ function main {
   local pane_target
 
   sessions=$(tmux list-panes -a -F "#{session_name}:#{window_index}:#{pane_index}|#{window_name}|#{pane_title}|#{pane_width}x#{pane_height}" | \
-    grep '|claude|' | \
+    grep "|${filter_name}|" | \
     awk -F'|' '{split($1, parts, ":"); print parts[1] ":" parts[2] ":[" parts[3] "]: " $3 " [" $4 "]"}' | \
     fzf --exit-0 --print-query --reverse)
   retval=$?
@@ -50,4 +51,4 @@ function main {
       "run '$CURRENT_DIR/make_new_session.sh \"$query\" \"%1\"'"
   fi
 }
-main
+main "$@"

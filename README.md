@@ -6,7 +6,12 @@
 
 This is a customized tmux session/window/pane switcher optimized for Claude Code workflows:
 
-1. **Claude-focused filtering**: Shows only panes in windows named "claude" across all sessions
+1. **Chord-based filtering**: `Ctrl+K` is a chord prefix — press a sub-key to filter by window name
+   - `Ctrl+K` → `c` — panes in windows named `claude`
+   - `Ctrl+K` → `s` — panes in windows named `server`
+   - `Ctrl+K` → `i` — panes in windows named `index`
+   - `Ctrl+K` → `t` — panes in windows named `test`
+   - Any other key after `Ctrl+K` — silently exits (tmux default behavior)
 2. **Pane-level switching**: Switch directly to specific panes, not just windows
 3. **Clean display format**: `<session-name>:<window-index>:[<pane-index>]: <pane-title> [dimensions]`
    - Example: `dictaphone:0:[1]: ✳ Project Structure [215x56]`
@@ -17,8 +22,8 @@ This is a customized tmux session/window/pane switcher optimized for Claude Code
 ### Why this fork?
 
 This fork is specifically designed for Claude Code users who:
-- Work with multiple tmux sessions running Claude
-- Want instant access to any Claude window across all sessions
+- Work with multiple tmux sessions running Claude, servers, or test runners
+- Want instant access to any specific window type across all sessions
 - Prefer a cleaner, more focused display showing only relevant windows
 - Need a fast, keyboard-driven workflow without prefix keys
 
@@ -47,9 +52,16 @@ iv-pro-media-router:1:[2]: just-commands [215x56]
 - Put `set -g @plugin 'yourusername/tmux-fzf-claude-switch'` into your tmux config
 - Use tpm to install this plugin. Default you can press `prefix + I` (`I` is
   `shift + i` = I)
-- **Default keybinding**: `Ctrl + K` (no prefix required)
-  - Press `Ctrl + K` to open the popup showing all "claude" panes
-  - Type to fuzzy search through the list
+- **Default keybinding**: `Ctrl + K` (chord prefix, no tmux prefix required)
+  - Press `Ctrl + K` to enter the chord, then press a sub-key:
+    | Sub-key | Filter |
+    |---------|--------|
+    | `c` | windows named `claude` |
+    | `s` | windows named `server` |
+    | `i` | windows named `index` |
+    | `t` | windows named `test` |
+    | any other key | exits silently |
+  - Type to fuzzy search through the filtered list
   - Press Enter to switch to the selected pane
 - If you type a name that doesn't exist, you will be prompted to create it.
 
