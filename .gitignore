@@ -1,6 +1,3 @@
-# Claude Code logs
-.claude/logs/
-
 # Tmux log files
 *.log
 tmux-client-*.log
