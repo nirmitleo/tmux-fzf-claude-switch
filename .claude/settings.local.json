@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv pip:*)",
+      "Bash(curl:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(humanlayer thoughts:*)",
+      "Bash(python:*)",
+      "Bash(python3 -m pytest tests/test_batch_tts.py -v)",
+      "Bash(uv run pytest:*)",
+      "Bash(uv run mypy:*)",
+      "Bash(cat:*)",
+      "Bash(uv run:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(python3 -m pytest backend/tests/test_story_session_workflow.py -v)",
+      "Bash(tmux list-windows:*)",
+      "Bash(awk:*)",
+      "Bash(tmux source-file:*)",
+      "Bash(tmux list-panes:*)",
+      "Bash(bash -n:*)",
+      "Bash(command -v:*)",
+      "Bash([[ \"dictaphone:0.1\" =~ ^[^:]+:[0-9]+.[0-9]+$ ]])",
+      "Bash([[ \"foo.bar\" =~ ^[^:]+:[0-9]+.[0-9]+$ ]])",
+      "Bash([[ \"foo\" =~ ^[^:]+:[0-9]+.[0-9]+$ ]])",
+      "Bash([[ \"my-session:5.2\" =~ ^[^:]+:[0-9]+.[0-9]+$ ]])",
+      "Bash([[ \"session:0\" =~ ^[^:]+:[0-9]+.[0-9]+$ ]])",
+      "Bash([[ \"dictaphone:0\" =~ ^[^:]+:[0-9]+$ ]])",
+      "Bash([[ \"foo\" =~ ^[^:]+:[0-9]+$ ]])",
+      "Bash([[ \"foo.bar\" =~ ^[^:]+:[0-9]+$ ]])",
+      "Bash(test:*)",
+      "Bash(git rm:*)",
+      "Bash(git log:*)",
+      "Bash(which shellcheck:*)",
+      "Bash(git checkout:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr:*)",
+      "Bash(git check-ignore:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
