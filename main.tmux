@@ -29,17 +29,24 @@ function set_goto_session_bindings {
 	local width=$(get_tmux_option "$tmux_claude_option_width" "$default_width")
 	local height=$(get_tmux_option "$tmux_claude_option_height" "$default_height")
 
+	# Bind the chord entry key
 	if [ "$without_prefix" = true ]; then
 		local key
 		for key in $key_bindings; do
-			tmux bind -n "$key" popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh"
+			tmux bind -n "$key" switch-client -T fzf-claude-switch
 		done
 	else
 		local key
 		for key in $key_bindings; do
-			tmux bind "$key" popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh"
+			tmux bind "$key" switch-client -T fzf-claude-switch
 		done
 	fi
+
+	# Bind sub-keys in the custom key table
+	tmux bind -T fzf-claude-switch c popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh claude"
+	tmux bind -T fzf-claude-switch s popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh server"
+	tmux bind -T fzf-claude-switch i popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh index"
+	tmux bind -T fzf-claude-switch t popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh test"
 }
 
 function main {
