@@ -13,8 +13,8 @@ This is a customized tmux session/window/pane switcher optimized for Claude Code
    - `Ctrl+K` → `t` — panes in windows named `test`
    - Any other key after `Ctrl+K` — silently exits (tmux default behavior)
 2. **Pane-level switching**: Switch directly to specific panes, not just windows
-3. **Clean display format**: `<session-name>:<window-index>:[<pane-index>]: <pane-title> [dimensions]`
-   - Example: `dictaphone:0:[1]: ✳ Project Structure [215x56]`
+3. **Clean display format**: aligned columns with Claude's working/idle status and time since the last message
+   - Example: `working  12s ago  dictaphone  0.1  Project Structure`
 4. **No-prefix keybinding**: Default is `Ctrl+K` (no prefix required)
 5. **Fuzzy search** with fzf for fast navigation
 6. **Create new sessions** if the name doesn't exist
@@ -29,22 +29,32 @@ This fork is specifically designed for Claude Code users who:
 
 ### Display Format
 
-The switcher shows panes in this format:
+The switcher shows one pane per row under a pinned column header. Claude panes are sorted by most recent
+activity; other panes follow with the first two columns blank:
 ```
-<session-name>:<window-index>:[<pane-index>]: <pane-title> [widthxheight]
+STATUS   LAST MSG  SESSION                 PANE  TITLE
+working  12s ago   tmux-fzf-claude-switch  5.1   Claude pane message timer
+idle     4m ago    tmux-wrangler           4.1   Tmux session name collision
+idle     1h ago    iv-pro-baby             4.1   Push remaining changes
 ```
 
-Example output:
-```
-dictaphone:0:[1]: ✳ Project Structure [215x56]
-iv-pro-copilot-v45:0:[0]: take one [215x58]
-iv-pro-media-router:1:[2]: just-commands [215x56]
-```
+- `STATUS`: `working` (yellow) while Claude is running, `idle` (dim) when it is waiting for you.
+- `LAST MSG`: time since the last user or assistant message (green under 10m, dim past 1h).
+- `SESSION`: each tmux session gets its own colour, the same in every popup.
+- `PANE`: `<window-index>.<pane-index>` within the session.
+
+Press `ctrl-s` to switch the order between `recent` (Claude panes by last activity) and `session`
+(alphabetical); the prompt shows the active order. While you type, fzf ranks rows by match quality instead.
+
+The status and age come from Claude Code's session registry (`~/.claude/sessions/<pid>.json`, whose `tmux` field
+records the pane ID) and the tail of that session's transcript (`~/.claude/projects/*/<sessionId>.jsonl`).
+`CLAUDE_CONFIG_DIR` is respected. The `session:window.pane` switch target is carried in a hidden fzf field, so
+it is not shown or searched.
 
 ## Requirements
 
 - [Tmux >= 3.3a](https://github.com/brokenricefilms/tmux-fzf-session-switch/pull/5/files) `pop-up menu`
-- [fzf](https://github.com/junegunn/fzf)
+- [fzf >= 0.53](https://github.com/junegunn/fzf) (for `--highlight-line`)
 
 ## Getting started
 
