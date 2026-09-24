@@ -3,7 +3,7 @@
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 default_key_bindings_goto="C-k"
-default_width=70
+default_width=90
 default_height=20
 default_without_prefix=true
 
@@ -43,10 +43,10 @@ function set_goto_session_bindings {
 	fi
 
 	# Bind sub-keys in the custom key table
-	tmux bind -T fzf-claude-switch c popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh claude"
-	tmux bind -T fzf-claude-switch s popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh server"
-	tmux bind -T fzf-claude-switch i popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh index"
-	tmux bind -T fzf-claude-switch t popup -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh test"
+	tmux bind -T fzf-claude-switch c popup -b rounded -T " claude " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh claude"
+	tmux bind -T fzf-claude-switch s popup -b rounded -T " server " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh server"
+	tmux bind -T fzf-claude-switch i popup -b rounded -T " index " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh index"
+	tmux bind -T fzf-claude-switch t popup -b rounded -T " test " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh test"
 }
 
 function main {
