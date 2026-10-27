@@ -67,6 +67,10 @@ open, or opens a new tmux window running it, and the popup closes.
 - Needs a `hub` that supports `--tmux` (its `hub help` lists `--tmux`). hub is looked up on the
   popup's `PATH`, then at `$CLAUDE_HUB/bin/hub` and `~/claude-hub/bin/hub`. If it is missing or
   too old, the popup says so and waits for a key.
+- The popup is sized to the picker. `hub --tmux-size <maxcols> <maxrows>` is asked how much room the
+  picker needs (inside the border) and the popup is opened at that size, never larger than the
+  width/height options below, which are maximums. A hub without `--tmux-size` (not in its `hub help`),
+  or one that fails, prints something unexpected or takes over 2 seconds, gets the maximum size.
 - `CLAUDE_HUB` (the hub root, default `~/claude-hub`) is passed through, including when it is only
   set in the tmux environment (`tmux set-environment -g CLAUDE_HUB ...`).
 - In the `Ctrl+K` → `c` switcher, a Claude pane whose session is a hub coordinator (`<project>-coord`)
@@ -79,12 +83,14 @@ Options (defaults shown):
 ```bash
 set -g @fzf-claude-hub-key 'h'                 # '' or 'off' disables hub mode
 set -g @fzf-claude-hub-without-prefix 'false'  # 'true' binds the key without the prefix
-set -g @fzf-claude-hub-width '90%'
-set -g @fzf-claude-hub-height '85%'
+set -g @fzf-claude-hub-autosize 'on'           # 'off' always opens the popup at the maximum size
+set -g @fzf-claude-hub-width '90%'             # maximum popup width: a % of the client or columns
+set -g @fzf-claude-hub-height '85%'            # maximum popup height: a % of the client or rows
 ```
 
-Turning hub mode off never unbinds anything, so a `prefix + h` of your own keeps working. After
-changing an option, reload the plugin (`tmux source ~/.tmux.conf` or `prefix + I`).
+Turning hub mode off never unbinds anything, so a `prefix + h` of your own keeps working. The key
+options need a plugin reload (`tmux source ~/.tmux.conf` or `prefix + I`). The size options are
+read each time you press the key.
 
 ## Requirements
 

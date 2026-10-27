@@ -12,16 +12,13 @@ tmux_claude_option_goto_without_prefix="@fzf-claude-goto-session-without-prefix"
 tmux_claude_option_width="@fzf-claude-goto-win-width"
 tmux_claude_option_height="@fzf-claude-goto-win-height"
 
-# Hub mode: prefix + h opens the cc-hub picker (`hub --tmux`) in a popup
+# Hub mode: prefix + h opens the cc-hub picker (`hub --tmux`) in a popup. Its size options
+# (@fzf-claude-hub-width / -height / -autosize) are read by scripts/hub_popup.sh at each press.
 default_hub_key="h"
 default_hub_without_prefix=false
-default_hub_width="90%"
-default_hub_height="85%"
 
 tmux_claude_option_hub_key="@fzf-claude-hub-key"
 tmux_claude_option_hub_without_prefix="@fzf-claude-hub-without-prefix"
-tmux_claude_option_hub_width="@fzf-claude-hub-width"
-tmux_claude_option_hub_height="@fzf-claude-hub-height"
 
 get_tmux_option() {
 	local option=$1
@@ -75,8 +72,6 @@ get_tmux_option_allow_empty() {
 function set_hub_bindings {
 	local key=$(get_tmux_option_allow_empty "$tmux_claude_option_hub_key" "$default_hub_key")
 	local without_prefix=$(get_tmux_option "$tmux_claude_option_hub_without_prefix" "$default_hub_without_prefix")
-	local width=$(get_tmux_option "$tmux_claude_option_hub_width" "$default_hub_width")
-	local height=$(get_tmux_option "$tmux_claude_option_hub_height" "$default_hub_height")
 
 	# Empty or "off" disables hub mode. Nothing is unbound, so a key of your own is left alone.
 	if [ -z "$key" ] || [ "$key" = off ]; then
@@ -87,7 +82,9 @@ function set_hub_bindings {
 	if [ "$without_prefix" = true ]; then
 		table_flag="-n"
 	fi
-	tmux bind $table_flag "$key" display-popup -E -b rounded -T " hub " -w "$width" -h "$height" "\"$CURRENT_DIR/scripts/hub_mode.sh\""
+	# hub_popup.sh sizes the popup to the picker, then opens it on this client. run-shell expands
+	# the formats; -b so tmux does not wait on it.
+	tmux bind $table_flag "$key" run-shell -b "\"$CURRENT_DIR/scripts/hub_popup.sh\" '#{client_name}' '#{pane_id}'"
 }
 
 function main {

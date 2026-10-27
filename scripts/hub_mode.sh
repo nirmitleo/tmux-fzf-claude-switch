@@ -8,39 +8,9 @@ DIM=$'\033[2m'
 BOLD=$'\033[1m'
 RESET=$'\033[0m'
 
-# Popups get the tmux environment, not your shell rc. If CLAUDE_HUB is set there (session
-# first, then global) but not here, pick it up. show-environment prints "-NAME" when unset.
-function load_claude_hub_from_tmux {
-  [ -n "$CLAUDE_HUB" ] && return
-  [ -n "$TMUX" ] || return
-  local line scope
-  for scope in "" "-g"; do
-    line=$(tmux show-environment $scope CLAUDE_HUB 2>/dev/null) || continue
-    case "$line" in
-      CLAUDE_HUB=?*)
-        export CLAUDE_HUB="${line#CLAUDE_HUB=}"
-        return
-        ;;
-    esac
-  done
-}
-
-# Prints the hub executable: the one on PATH, else the default install location
-function find_hub {
-  local candidate
-  candidate=$(command -v hub 2>/dev/null)
-  if [ -n "$candidate" ]; then
-    echo "$candidate"
-    return 0
-  fi
-  for candidate in "${CLAUDE_HUB:-$HOME/claude-hub}/bin/hub" "$HOME/claude-hub/bin/hub"; do
-    if [ -x "$candidate" ]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
-  return 1
-}
+CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=hub_common.sh
+. "$CURRENT_DIR/hub_common.sh"
 
 # Prints its arguments as dim lines, then waits for any key
 function show_and_wait {
@@ -69,7 +39,7 @@ function main {
     exit 1
   fi
 
-  if ! "$hub" help 2>&1 | grep -q -- '--tmux'; then
+  if ! hub_supports "$hub" --tmux; then
     show_and_wait \
       "${BOLD}update hub${RESET}${DIM}" \
       "" \
