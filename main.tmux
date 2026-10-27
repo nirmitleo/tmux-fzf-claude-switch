@@ -12,6 +12,17 @@ tmux_claude_option_goto_without_prefix="@fzf-claude-goto-session-without-prefix"
 tmux_claude_option_width="@fzf-claude-goto-win-width"
 tmux_claude_option_height="@fzf-claude-goto-win-height"
 
+# Hub mode: prefix + h opens the cc-hub picker (`hub --tmux`) in a popup
+default_hub_key="h"
+default_hub_without_prefix=false
+default_hub_width="90%"
+default_hub_height="85%"
+
+tmux_claude_option_hub_key="@fzf-claude-hub-key"
+tmux_claude_option_hub_without_prefix="@fzf-claude-hub-without-prefix"
+tmux_claude_option_hub_width="@fzf-claude-hub-width"
+tmux_claude_option_hub_height="@fzf-claude-hub-height"
+
 get_tmux_option() {
 	local option=$1
 	local default_value=$2
@@ -49,7 +60,38 @@ function set_goto_session_bindings {
 	tmux bind -T fzf-claude-switch t popup -b rounded -T " test " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh test"
 }
 
+# Like get_tmux_option, but an option explicitly set to "" stays empty instead of falling back
+# to the default (`show-option -gqv` prints nothing both when unset and when set to "").
+get_tmux_option_allow_empty() {
+	local option=$1
+	local default_value=$2
+	if [ -n "$(tmux show-option -gq "$option")" ]; then
+		tmux show-option -gqv "$option"
+	else
+		echo "$default_value"
+	fi
+}
+
+function set_hub_bindings {
+	local key=$(get_tmux_option_allow_empty "$tmux_claude_option_hub_key" "$default_hub_key")
+	local without_prefix=$(get_tmux_option "$tmux_claude_option_hub_without_prefix" "$default_hub_without_prefix")
+	local width=$(get_tmux_option "$tmux_claude_option_hub_width" "$default_hub_width")
+	local height=$(get_tmux_option "$tmux_claude_option_hub_height" "$default_hub_height")
+
+	# Empty or "off" disables hub mode. Nothing is unbound, so a key of your own is left alone.
+	if [ -z "$key" ] || [ "$key" = off ]; then
+		return
+	fi
+
+	local table_flag=""
+	if [ "$without_prefix" = true ]; then
+		table_flag="-n"
+	fi
+	tmux bind $table_flag "$key" display-popup -E -b rounded -T " hub " -w "$width" -h "$height" "\"$CURRENT_DIR/scripts/hub_mode.sh\""
+}
+
 function main {
 	set_goto_session_bindings
+	set_hub_bindings
 }
 main

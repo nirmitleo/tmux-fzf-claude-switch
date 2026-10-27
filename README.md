@@ -18,6 +18,9 @@ This is a customized tmux session/window/pane switcher optimized for Claude Code
 4. **No-prefix keybinding**: Default is `Ctrl+K` (no prefix required)
 5. **Fuzzy search** with fzf for fast navigation
 6. **Create new sessions** if the name doesn't exist
+7. **Hub mode**: `prefix + h` opens the [cc-hub](#hub-mode) picker (projects, coordinators, threads) in a popup
+   - Claude panes that belong to a hub project get a dim `hub:<project>` or `hub:<project>/<thread>` tag
+     in the `Ctrl+K` → `c` switcher
 
 ### Why this fork?
 
@@ -51,6 +54,38 @@ records the pane ID) and the tail of that session's transcript (`~/.claude/proje
 `CLAUDE_CONFIG_DIR` is respected. The `session:window.pane` switch target is carried in a hidden fzf field, so
 it is not shown or searched.
 
+## Hub mode
+
+`hub` is a CLI that runs Claude Code "projects": a coordinator session plus background thread
+sessions that share a memory. Bare `hub` opens an fzf picker of every project with its
+coordinator and threads, in the style of `claude agents`.
+
+Press `prefix + h` (with the tmux prefix) from anywhere in tmux to open that picker in a popup.
+The popup runs `hub --tmux`: choosing a session switches to the tmux pane where it is already
+open, or opens a new tmux window running it, and the popup closes.
+
+- Needs a `hub` that supports `--tmux` (its `hub help` lists `--tmux`). hub is looked up on the
+  popup's `PATH`, then at `$CLAUDE_HUB/bin/hub` and `~/claude-hub/bin/hub`. If it is missing or
+  too old, the popup says so and waits for a key.
+- `CLAUDE_HUB` (the hub root, default `~/claude-hub`) is passed through, including when it is only
+  set in the tmux environment (`tmux set-environment -g CLAUDE_HUB ...`).
+- In the `Ctrl+K` → `c` switcher, a Claude pane whose session is a hub coordinator (`<project>-coord`)
+  is tagged `hub:<project>`, a thread (`<project>--<slug>`) `hub:<project>/<slug>`, and any other
+  session started inside `$CLAUDE_HUB/projects/<project>` `hub:<project>`. The tag is dim, sits at
+  the start of the title and can be searched (type `hub:`). Without a hub install nothing changes.
+
+Options (defaults shown):
+
+```bash
+set -g @fzf-claude-hub-key 'h'                 # '' or 'off' disables hub mode
+set -g @fzf-claude-hub-without-prefix 'false'  # 'true' binds the key without the prefix
+set -g @fzf-claude-hub-width '90%'
+set -g @fzf-claude-hub-height '85%'
+```
+
+Turning hub mode off never unbinds anything, so a `prefix + h` of your own keeps working. After
+changing an option, reload the plugin (`tmux source ~/.tmux.conf` or `prefix + I`).
+
 ## Requirements
 
 - [Tmux >= 3.3a](https://github.com/brokenricefilms/tmux-fzf-session-switch/pull/5/files) `pop-up menu`
@@ -76,6 +111,19 @@ it is not shown or searched.
 - If you type a name that doesn't exist, you will be prompted to create it.
 
 > If this name conflicts with another session name -> add a double/single quotes `'example'`
+
+## Tests
+
+`tests/run.sh` drives the plugin in throwaway tmux servers (sockets `hubmodetest` and
+`hubmodetest-outer`, `-f /dev/null`), so your own tmux server and config are not touched. It checks
+the key bindings, `hub_mode.sh` with stub `hub` executables, a real `prefix + h` through an attached
+client, and the hub tag against a fake `CLAUDE_CONFIG_DIR`. Run it with both bashes, since tmux
+`run-shell` may use macOS's bash 3.2:
+
+```bash
+bash tests/run.sh
+/bin/bash tests/run.sh
+```
 
 ## Customize
 

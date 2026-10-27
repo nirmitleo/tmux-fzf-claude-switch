@@ -2,6 +2,7 @@
 
 CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+HUB_PROJECTS="${CLAUDE_HUB:-$HOME/claude-hub}/projects"
 
 # ISO-8601 UTC timestamp (e.g. 2026-09-24T10:37:57.228Z) -> epoch seconds (GNU or BSD date)
 function iso_to_epoch {
@@ -10,11 +11,41 @@ function iso_to_epoch {
   date -u -d "${ts}Z" +%s 2>/dev/null || date -j -u -f '%Y-%m-%dT%H:%M:%S' "$ts" +%s 2>/dev/null
 }
 
-# Prints "<pane_id> <seconds> <status>" for every tmux pane running a live Claude Code session,
-# where seconds is the time since the last user/assistant message in its transcript and
-# status is Claude's own busy/idle state.
+# Sets HUB_TAG to the cc-hub tag for a Claude session, or "-" when it is not part of a hub project
+# (a variable rather than output, so the per-session loop does not fork a subshell):
+#   hub:<project>         the project's coordinator (session named "<project>-coord")
+#   hub:<project>/<slug>  one of its threads (session named "<project>--<slug>")
+#   hub:<project>         any other session whose cwd is inside $CLAUDE_HUB/projects/<project>
+# A tag is only given when $CLAUDE_HUB/projects/<project> exists, so random "a--b" names are
+# ignored and nothing is tagged when hub is not installed.
+function hub_tag {
+  local name=$1 cwd=$2 project="" slug=""
+  case "$name" in
+    ?*--?*) project=${name%%--*}; slug=${name#*--} ;;
+    ?*-coord) project=${name%-coord} ;;
+  esac
+  if [ -z "$project" ] || [ ! -d "$HUB_PROJECTS/$project" ]; then
+    slug=""
+    case "$cwd" in
+      "$HUB_PROJECTS"/?*) project=${cwd#"$HUB_PROJECTS"/}; project=${project%%/*} ;;
+      *) project="" ;;
+    esac
+  fi
+  case "$project$slug" in
+    *[!A-Za-z0-9._-]*) project="" ;; # the tag must stay one space-free token
+  esac
+  if [ -n "$project" ] && [ -d "$HUB_PROJECTS/$project" ]; then
+    HUB_TAG="hub:$project${slug:+/$slug}"
+  else
+    HUB_TAG="-"
+  fi
+}
+
+# Prints "<pane_id> <seconds> <status> <hub tag>" for every tmux pane running a live Claude Code
+# session, where seconds is the time since the last user/assistant message in its transcript,
+# status is Claude's own busy/idle state and the hub tag comes from hub_tag ("-" for none).
 function claude_pane_ages {
-  local now session_file pid pane_id session_id status transcript ts epoch
+  local now session_file pid pane_id session_id status transcript ts epoch name cwd tag line
   now=$(date +%s)
   for session_file in "$CLAUDE_DIR"/sessions/*.json; do
     [ -f "$session_file" ] || continue
@@ -26,6 +57,18 @@ function claude_pane_ages {
     session_id=$(sed -nE 's/.*"sessionId":"([^"]+)".*/\1/p' "$session_file")
     status=$(sed -nE 's/.*"status":"([^"]+)".*/\1/p' "$session_file")
     [ -n "$pane_id" ] && [ -n "$session_id" ] || continue
+
+    tag="-"
+    if [ -d "$HUB_PROJECTS" ]; then
+      # One sed prints "n<name>" and "c<cwd>". The live name is the "name" key followed by
+      # nameSource/nameSince; a greedy match on "name" alone could pick one from "formerNames".
+      name=""; cwd=""
+      while IFS= read -r line; do
+        case "$line" in n*) name=${line#n} ;; c*) cwd=${line#c} ;; esac
+      done < <(sed -nE 'h; s/.*"name":"([^"]*)","name(Source|Since)".*/n\1/p; g; s/.*"cwd":"([^"]*)".*/c\1/p' "$session_file")
+      hub_tag "$name" "$cwd"
+      tag=$HUB_TAG
+    fi
 
     transcript=$(ls "$CLAUDE_DIR"/projects/*/"$session_id".jsonl 2>/dev/null | head -n 1)
     [ -n "$transcript" ] || continue
@@ -40,7 +83,7 @@ function claude_pane_ages {
 
     epoch=$(iso_to_epoch "$ts")
     [ -n "$epoch" ] || continue
-    echo "$pane_id $((now - epoch)) ${status:-idle}"
+    echo "$pane_id $((now - epoch)) ${status:-idle} $tag"
   done
 }
 
@@ -59,10 +102,13 @@ function list_panes {
         if (s < 86400) return int(s / 3600) "h"
         return int(s / 86400) "d"
       }
-      # ages is "pane_id secs status ..." (BSD awk rejects newlines in -v values)
+      # ages is "pane_id secs status hubtag ..." (BSD awk rejects newlines in -v values)
       BEGIN {
         n = split(ages, kv, " ")
-        for (i = 1; i + 2 <= n; i += 3) { secs[kv[i]] = kv[i + 1]; state[kv[i]] = kv[i + 2] }
+        for (i = 1; i + 3 <= n; i += 4) {
+          secs[kv[i]] = kv[i + 1]; state[kv[i]] = kv[i + 2]
+          if (kv[i + 3] != "-") hub[kv[i]] = kv[i + 3]
+        }
         RESET = "\033[0m"; DIM = "\033[2m"; BOLD = "\033[1m"
         GREEN = "\033[32m"; YELLOW = "\033[33m"
         # 256-colour session palette; avoids plain yellow/green, which the STATUS/LAST MSG columns use
@@ -102,6 +148,8 @@ function list_panes {
             status_color = busy ? YELLOW : DIM
             age_text = fmt_age(s) " ago"
             age_color = (s < 600) ? GREEN : (s < 3600) ? "" : DIM
+            # cc-hub sessions get a dim tag at the start of the title, where it is not cut off
+            if (p in hub) t = DIM hub[p] RESET "  " t
           } else {
             s = 9999999999
             status_text = ""; age_text = ""; status_color = ""; age_color = ""
