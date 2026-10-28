@@ -22,6 +22,7 @@ This is a customized tmux session/window/pane switcher optimized for Claude Code
 7. **Hub mode**: `Ctrl+K` → `h` opens the [cc-hub](#hub-mode) picker (projects, coordinators, threads) in a popup
    - Claude panes that belong to a hub project get a dim `hub:<project>` or `hub:<project>/<thread>` tag
      in the `Ctrl+K` → `c` switcher
+   - Panes of [archived](#archived-projects) hub projects are hidden; `ctrl-r` shows them
 
 ### Why this fork?
 
@@ -49,6 +50,8 @@ idle     1h ago    iv-pro-baby             4.1   Push remaining changes
 
 Press `ctrl-s` to switch the order between `recent` (Claude panes by last activity) and `session`
 (alphabetical); the prompt shows the active order. While you type, fzf ranks rows by match quality instead.
+With hub installed, `ctrl-r` shows or hides the panes of [archived hub projects](#archived-projects)
+(the prompt then reads `recent +archived ❯`).
 
 The status and age come from Claude Code's session registry (`~/.claude/sessions/<pid>.json`, whose `tmux` field
 records the pane ID) and the tail of that session's transcript (`~/.claude/projects/*/<sessionId>.jsonl`).
@@ -80,9 +83,32 @@ open, or opens a new tmux window running it, and the popup closes.
   session started inside `$CLAUDE_HUB/projects/<project>` `hub:<project>`. The tag is dim, sits at
   the start of the title and can be searched (type `hub:`). Without a hub install nothing changes.
 
+### Archived projects
+
+A hub project is archived when the file `$CLAUDE_HUB/projects/<project>/.archived` exists. hub's
+`hub archive <project>` and `hub unarchive <project>` (in hub versions that have them) create and
+remove it; `touch` and `rm` do the same by hand. Only the file's existence matters (hub writes the
+date into it).
+
+Archiving only hides. In the `Ctrl+K` switchers (`c`, and `s`/`i`/`t` when a Claude pane sits in
+such a window), the panes of an archived project's coordinator, threads and other sessions are left
+out. Nothing is stopped, killed, renamed or moved, and other rows keep their order and colours. To
+reach them:
+
+- Press `ctrl-r` in the switcher to show archived rows, and again to hide them. Shown, a row is dim
+  and tagged `hub:<project> archived` (type `archived` to find them). `ctrl-s` keeps the choice.
+- Or set `@fzf-claude-show-archived` to `on` to show them every time the switcher opens (`ctrl-r`
+  still hides them). It is read each time the popup opens, so no reload is needed.
+
+If every row is archived, the popup still opens (empty, with the `ctrl-r` hint) instead of closing
+straight away.
+
+Hub mode (`Ctrl+K` → `h`) is not filtered by the plugin: `hub --tmux` decides what its picker shows.
+
 Options (defaults shown):
 
 ```bash
+set -g @fzf-claude-show-archived 'off'         # 'on' lists archived hub projects' panes in the switcher
 set -g @fzf-claude-hub-key 'h'                 # '' or 'off' disables hub mode
 set -g @fzf-claude-hub-table 'chord'           # chord: Ctrl+K then the key; prefix: prefix + key;
                                                # root: the key alone, no prefix
@@ -137,7 +163,8 @@ size options are read each time you press the key.
 `tests/run.sh` drives the plugin in throwaway tmux servers (sockets `hubmodetest` and
 `hubmodetest-outer`, `-f /dev/null`), so your own tmux server and config are not touched. It checks
 the key bindings, `hub_mode.sh` with stub `hub` executables, real `Ctrl+K` `h`/`c`/`s` presses through
-an attached client, and the hub tag against a fake `CLAUDE_CONFIG_DIR`. Run it with both bashes, since tmux
+an attached client, the hub tag and archived projects (hidden, `--list ... on`, `ctrl-r`/`ctrl-s`,
+`@fzf-claude-show-archived`; with the real fzf too when it is installed) against a fake `CLAUDE_CONFIG_DIR`. Run it with both bashes, since tmux
 `run-shell` may use macOS's bash 3.2:
 
 ```bash
