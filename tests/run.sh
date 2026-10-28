@@ -90,7 +90,17 @@ cat >"$TMP/stub-old/hub" <<EOF
 if [ "\$1" = help ]; then echo "  hub ls     list threads"; exit 0; fi
 echo "args=\$* (old)" >>"$LOG"
 EOF
-chmod +x "$TMP/stub-new/hub" "$TMP/stub-sized/hub" "$TMP/stub-old/hub"
+# fzf (for the C-k c / s switcher popups): shows a marker with its prompt on the popup, logs how
+# many rows it got, then exits 130 as if Esc was pressed, so nothing is switched or created.
+cat >"$TMP/stub-new/fzf" <<EOF
+#!/bin/sh
+n=\$(wc -l | tr -d ' ')
+echo "fzf-rows=\$n" >>"$LOG"
+echo "STUB-FZF-SWITCHER" >/dev/tty
+sleep 1.5
+exit 130
+EOF
+chmod +x "$TMP/stub-new/hub" "$TMP/stub-sized/hub" "$TMP/stub-old/hub" "$TMP/stub-new/fzf"
 BASEPATH="/usr/bin:/bin:/usr/sbin:/sbin"
 TMUXDIR=$(dirname "$(command -v tmux)")
 
@@ -100,38 +110,85 @@ for f in "$ROOT/main.tmux" "$ROOT"/scripts/*.sh "$ROOT/tests/run.sh"; do
 done
 
 echo "== bindings"
+CHORD=fzf-claude-switch
+hub_keys() { T list-keys 2>/dev/null | grep hub_; } # every hub binding, in any table
 fresh_server
-k=$(T list-keys -T prefix h 2>&1)
-check "prefix + h bound by default to run-shell -b" contains "$k" "run-shell -b"
+k=$(T list-keys -T $CHORD h 2>&1)
+check "C-k h: hub key bound in the chord table by default, to run-shell -b" contains "$k" "run-shell -b"
 check "  ... running hub_popup.sh with this client and pane" \
   contains "$k" "$ROOT/scripts/hub_popup.sh\\\" '#{client_name}' '#{pane_id}'"
-check "no root-table h by default" test -z "$(T list-keys -T root h 2>/dev/null)"
+check "  ... prefix + h is not bound" test -z "$(T list-keys -T prefix h 2>/dev/null)"
+check "  ... no root-table h" test -z "$(T list-keys -T root h 2>/dev/null)"
+check "  ... exactly one hub binding" test "$(hub_keys | wc -l)" -eq 1
 
 fresh_server @fzf-claude-hub-key H
-k=$(T list-keys -T prefix H 2>&1)
-check "@fzf-claude-hub-key changes the key" contains "$k" "hub_popup.sh"
-check "custom key leaves prefix + h unbound" test -z "$(T list-keys -T prefix h 2>/dev/null)"
+k=$(T list-keys -T $CHORD H 2>&1)
+check "@fzf-claude-hub-key changes the key (C-k H)" contains "$k" "hub_popup.sh"
+check "  ... and C-k h is left unbound" test -z "$(T list-keys -T $CHORD h 2>/dev/null)"
+
+fresh_server @fzf-claude-hub-table prefix
+k=$(T list-keys -T prefix h 2>&1)
+check "@fzf-claude-hub-table prefix: prefix + h, as before" contains "$k" "hub_popup.sh"
+check "  ... and not in the chord table" test -z "$(T list-keys -T $CHORD h 2>/dev/null)"
+check "  ... exactly one hub binding" test "$(hub_keys | wc -l)" -eq 1
+
+fresh_server @fzf-claude-hub-key M-h @fzf-claude-hub-table root
+k=$(T list-keys -T root M-h 2>&1)
+check "@fzf-claude-hub-table root: bound without any prefix" contains "$k" "hub_popup.sh"
+check "  ... exactly one hub binding" test "$(hub_keys | wc -l)" -eq 1
 
 fresh_server @fzf-claude-hub-key M-h @fzf-claude-hub-without-prefix true
 k=$(T list-keys -T root M-h 2>&1)
-check "@fzf-claude-hub-without-prefix true binds in the root table" contains "$k" "hub_popup.sh"
-check "  ... and not in the prefix table" test -z "$(T list-keys -T prefix M-h 2>/dev/null)"
+check "@fzf-claude-hub-without-prefix true (older option) still means root" contains "$k" "hub_popup.sh"
+check "  ... and not in the prefix or chord table" \
+  test -z "$(T list-keys -T prefix M-h 2>/dev/null)$(T list-keys -T $CHORD M-h 2>/dev/null)"
+fresh_server @fzf-claude-hub-without-prefix false
+check "@fzf-claude-hub-without-prefix false: still the chord default" contains "$(T list-keys -T $CHORD h 2>&1)" "hub_popup.sh"
+fresh_server @fzf-claude-hub-without-prefix true @fzf-claude-hub-table prefix
+check "an explicit @fzf-claude-hub-table wins over without-prefix" contains "$(T list-keys -T prefix h 2>&1)" "hub_popup.sh"
+check "  ... exactly one hub binding" test "$(hub_keys | wc -l)" -eq 1
+fresh_server @fzf-claude-hub-table bogus
+check "an unknown @fzf-claude-hub-table falls back to the chord table" contains "$(T list-keys -T $CHORD h 2>&1)" "hub_popup.sh"
 
 fresh_server @fzf-claude-hub-key off
-check "@fzf-claude-hub-key off: no hub binding" test -z "$(T list-keys 2>/dev/null | grep hub_)"
+check "@fzf-claude-hub-key off: no hub binding" test -z "$(hub_keys)"
 fresh_server @fzf-claude-hub-key ''
-check "@fzf-claude-hub-key '': no hub binding" test -z "$(T list-keys 2>/dev/null | grep hub_)"
+check "@fzf-claude-hub-key '': no hub binding" test -z "$(hub_keys)"
+fresh_server @fzf-claude-hub-key off @fzf-claude-hub-table prefix
+check "  ... off with a table set: still no hub binding" test -z "$(hub_keys)"
+
+# Reloads: the plugin removes hub bindings it made earlier, never a binding of your own
+fresh_server
+T bind h run-shell -b "\"/old/plugin/scripts/hub_mode.sh\""   # what the previous version bound
+T bind -n M-h run-shell -b "\"/old/plugin/scripts/hub_popup.sh\" x y"
+T run-shell "$SH '$ROOT/main.tmux'"
+check "reload after upgrading: the old prefix + h hub binding is removed" test -z "$(T list-keys -T prefix h 2>/dev/null)"
+check "  ... and an old root hub binding too" test -z "$(T list-keys -T root M-h 2>/dev/null)"
+check "  ... leaving only C-k h" test "$(hub_keys | wc -l)" -eq 1 -a -n "$(T list-keys -T $CHORD h 2>/dev/null)"
+T set -g @fzf-claude-hub-table prefix; T run-shell "$SH '$ROOT/main.tmux'"
+check "reload after switching to prefix: C-k h is removed, prefix + h bound" \
+  test -z "$(T list-keys -T $CHORD h 2>/dev/null)" -a -n "$(T list-keys -T prefix h 2>/dev/null)"
+T set -g @fzf-claude-hub-key off; T run-shell "$SH '$ROOT/main.tmux'"
+check "reload after turning hub mode off: no hub binding left" test -z "$(hub_keys)"
+fresh_server @fzf-claude-hub-key off
+T bind h display-message mine; T bind -n M-h display-message mine2
+T run-shell "$SH '$ROOT/main.tmux'"
+check "a prefix + h of your own is kept" contains "$(T list-keys -T prefix h 2>&1)" "display-message mine"
+check "  ... and a root key of your own" contains "$(T list-keys -T root M-h 2>&1)" "display-message mine2"
+T set -gu @fzf-claude-hub-key; T run-shell "$SH '$ROOT/main.tmux'"
+check "  ... also when hub mode is on (it uses C-k h)" contains "$(T list-keys -T prefix h 2>&1)" "display-message mine"
 
 # The Ctrl+K chord must be exactly what origin/main binds (modulo the plugin path)
 mkdir -p "$TMP/base"
 if git -C "$ROOT" show origin/main:main.tmux >"$TMP/base/main.tmux" 2>/dev/null; then
   fresh_server
-  ours=$( { T list-keys -T root C-k; T list-keys -T fzf-claude-switch; } | sed "s|$ROOT|ROOT|g")
+  # Apart from the new h (hub mode) line, which origin/main binds as prefix + h instead
+  ours=$( { T list-keys -T root C-k; T list-keys -T fzf-claude-switch; } | grep -v hub_popup.sh | sed "s|$ROOT|ROOT|g")
   T kill-server 2>/dev/null; T new-session -d -s t
   T run-shell "$SH '$TMP/base/main.tmux'"
-  base=$( { T list-keys -T root C-k; T list-keys -T fzf-claude-switch; } | sed "s|$TMP/base|ROOT|g")
-  if [ "$ours" = "$base" ]; then ok "Ctrl+K chord bindings identical to origin/main"
-  else bad "Ctrl+K chord bindings identical to origin/main" "$(diff <(echo "$base") <(echo "$ours"))"; fi
+  base=$( { T list-keys -T root C-k; T list-keys -T fzf-claude-switch; } | grep -v 'hub_' | sed "s|$TMP/base|ROOT|g")
+  if [ "$ours" = "$base" ]; then ok "Ctrl+K chord c/s/i/t bindings identical to origin/main"
+  else bad "Ctrl+K chord c/s/i/t bindings identical to origin/main" "$(diff <(echo "$base") <(echo "$ours"))"; fi
   check "  ... C-k enters the chord table, c/s/i/t open popups" test "$(printf '%s\n' "$ours" | grep -c 'popup')" = 4
 else
   bad "could not read origin/main:main.tmux (git fetch?)"
@@ -179,7 +236,7 @@ env -i HOME="$TMP/home" PATH="$TMP/stub-new:$BASEPATH:$TMUXDIR" TMUX="$TMUX_VAL"
   "$SH" "$ROOT/scripts/hub_mode.sh" </dev/null >/dev/null 2>&1
 check "  ... but an exported CLAUDE_HUB wins" contains "$(cat "$LOG")" "CLAUDE_HUB=/from/shell"
 
-echo "== prefix + h through a real client (nested throwaway servers)"
+echo "== C-k h (and C-k c / s) through a real client (nested throwaway servers)"
 # The inner server's global PATH decides which stub the popup finds. An outer server's pane
 # runs a client attached to the inner one, so send-keys to it is a real key press.
 T kill-server 2>/dev/null
@@ -197,11 +254,25 @@ popup_open() { contains "$(screen)" "$1"; }
 popup_closed() { ! contains "$(screen)" "$1"; }
 
 : >"$LOG"
-TO send-keys -t o C-b h
-check "prefix + h opens a ' hub ' popup running hub --tmux" wait_for popup_open "STUB-HUB-PICKER"
+TO send-keys -t o C-k h
+check "C-k h opens a ' hub ' popup running hub --tmux" wait_for popup_open "STUB-HUB-PICKER"
 check "  ... popup is titled ' hub '" contains "$(screen)" " hub "
 check "  ... hub got --tmux" contains "$(cat "$LOG")" "args=--tmux"
 check "  ... popup closes when hub exits" wait_for popup_closed "STUB-HUB-PICKER"
+
+: >"$LOG"
+TO send-keys -t o C-b h
+sleep 1
+check "prefix + h no longer opens hub mode" lacks "$(screen)$(cat "$LOG")" "STUB-HUB-PICKER"
+
+for sub in c:claude s:server; do
+  : >"$LOG"
+  TO send-keys -t o C-k "${sub%%:*}"
+  check "C-k ${sub%%:*} still opens the ' ${sub#*:} ' switcher popup" wait_for popup_open "STUB-FZF-SWITCHER"
+  check "  ... titled ' ${sub#*:} '" contains "$(screen)" " ${sub#*:} "
+  check "  ... and closes on Esc (fzf exits 130)" wait_for popup_closed "STUB-FZF-SWITCHER"
+  check "  ... fzf got the header row" grep -q 'fzf-rows=[1-9]' "$LOG"
+done
 
 echo "== popup size (hub --tmux-size)"
 # hub_popup.sh is run directly with $SH (so both bashes are covered) on the attached client. The
@@ -268,24 +339,28 @@ check "  ... and hub --tmux runs" contains "$(cat "$LOG")" "args=--tmux"
 
 T set-environment -g PATH "$TMP/stub-sized:$BASEPATH:$TMUXDIR"
 echo ok >"$TMP/size-mode"; echo "50 6" >"$TMP/size-out"; : >"$LOG"
-TO send-keys -t o C-b h
+TO send-keys -t o C-k h
 popup_done
-check "prefix + h itself opens the autosized popup (content 50x6)" tty_is "6 50"
+check "C-k h itself opens the autosized popup (content 50x6)" tty_is "6 50"
 
 T set-environment -g PATH "$TMP/stub-old:$BASEPATH:$TMUXDIR"
 : >"$LOG"
-TO send-keys -t o C-b h
+TO send-keys -t o C-k h
 check "old hub: popup shows 'update hub'" wait_for popup_open "update hub"
 sleep 0.5
 check "  ... and stays open" popup_open "update hub"
 TO send-keys -t o q
 check "  ... until a key is pressed" wait_for popup_closed "update hub"
+sleep 0.3
+check "  ... and leaves the pane out of view-mode (no 'returned 1')" test -z "$(T display -p -t t '#{pane_mode}')"
 
 T set-environment -g PATH "$BASEPATH:$TMUXDIR"
-TO send-keys -t o C-b h
+TO send-keys -t o C-k h
 check "no hub: popup shows the install message" wait_for popup_open "hub is not installed"
 TO send-keys -t o Enter
 check "  ... and closes on a key" wait_for popup_closed "hub is not installed"
+sleep 0.3
+check "  ... and leaves the pane out of view-mode" test -z "$(T display -p -t t '#{pane_mode}')"
 TO kill-server 2>/dev/null
 
 echo "== hub tag in the Claude switcher (--list)"

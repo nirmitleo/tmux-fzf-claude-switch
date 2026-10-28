@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Opens the hub mode popup, sized to the picker's content.
 #
-#   hub_popup.sh <client> <pane>     (prefix + h runs it with run-shell -b)
+#   hub_popup.sh <client> <pane>     (the hub key, C-k h by default, runs it with run-shell -b)
 #
 # @fzf-claude-hub-width / -height (default 90% / 85% of the client) are the MAXIMUM popup size.
 # With @fzf-claude-hub-autosize on (the default) and a hub whose `hub help` lists --tmux-size,
@@ -104,6 +104,10 @@ function main {
 
   tmux display-popup ${target[@]+"${target[@]}"} -E -b rounded -T " hub " -w "$POPUP_W" -h "$POPUP_H" \
     "\"$CURRENT_DIR/hub_mode.sh\""
+  # display-popup passes on the popup's exit status (1 after the "update hub" message, or whatever
+  # hub exits with). Never return it: run-shell would show "'hub_popup.sh ...' returned 1" in
+  # view-mode on the pane, and that mode would eat the next key (C-k is copy-end-of-line there).
+  return 0
 }
 
 main "$@"

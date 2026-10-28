@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Hub mode: runs the cc-hub picker (`hub --tmux`) inside the popup that prefix + h opens.
+# Hub mode: runs the cc-hub picker (`hub --tmux`) inside the popup that the hub key opens
+# (C-k h by default; see @fzf-claude-hub-key and @fzf-claude-hub-table in main.tmux).
 # `hub --tmux` switches to (or opens) the tmux pane of the chosen Claude session and exits,
 # which closes the popup. If hub is missing or too old, say so and wait for a key, so the
 # popup does not vanish before the message can be read.
@@ -35,7 +36,7 @@ function main {
       "" \
       "Hub mode opens the cc-hub picker: your Claude Code projects, their" \
       "coordinators and threads. Install hub so that \`hub\` is on your PATH" \
-      "(or at ~/claude-hub/bin/hub), then press prefix + h again."
+      "(or at ~/claude-hub/bin/hub), then open hub mode again."
     exit 1
   fi
 
@@ -45,7 +46,7 @@ function main {
       "" \
       "Hub mode needs \`hub --tmux\`, which this hub does not support:" \
       "$hub" \
-      "Update hub, then press prefix + h again."
+      "Update hub, then open hub mode again."
     exit 1
   fi
 

@@ -12,12 +12,19 @@ tmux_claude_option_goto_without_prefix="@fzf-claude-goto-session-without-prefix"
 tmux_claude_option_width="@fzf-claude-goto-win-width"
 tmux_claude_option_height="@fzf-claude-goto-win-height"
 
-# Hub mode: prefix + h opens the cc-hub picker (`hub --tmux`) in a popup. Its size options
-# (@fzf-claude-hub-width / -height / -autosize) are read by scripts/hub_popup.sh at each press.
+# The chord table that the goto key (default C-k) enters; c/s/i/t (and h, hub mode) live in it
+chord_table="fzf-claude-switch"
+
+# Hub mode: C-k h (the hub key in the chord table) opens the cc-hub picker (`hub --tmux`) in a
+# popup. @fzf-claude-hub-table moves the key to the prefix table (prefix + h) or the root table
+# (no prefix). @fzf-claude-hub-without-prefix true is the older spelling of the root table. The
+# size options (@fzf-claude-hub-width / -height / -autosize) are read by scripts/hub_popup.sh at
+# each press.
 default_hub_key="h"
-default_hub_without_prefix=false
+default_hub_table="chord"
 
 tmux_claude_option_hub_key="@fzf-claude-hub-key"
+tmux_claude_option_hub_table="@fzf-claude-hub-table"
 tmux_claude_option_hub_without_prefix="@fzf-claude-hub-without-prefix"
 
 get_tmux_option() {
@@ -41,20 +48,20 @@ function set_goto_session_bindings {
 	if [ "$without_prefix" = true ]; then
 		local key
 		for key in $key_bindings; do
-			tmux bind -n "$key" switch-client -T fzf-claude-switch
+			tmux bind -n "$key" switch-client -T "$chord_table"
 		done
 	else
 		local key
 		for key in $key_bindings; do
-			tmux bind "$key" switch-client -T fzf-claude-switch
+			tmux bind "$key" switch-client -T "$chord_table"
 		done
 	fi
 
 	# Bind sub-keys in the custom key table
-	tmux bind -T fzf-claude-switch c popup -b rounded -T " claude " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh claude"
-	tmux bind -T fzf-claude-switch s popup -b rounded -T " server " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh server"
-	tmux bind -T fzf-claude-switch i popup -b rounded -T " index " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh index"
-	tmux bind -T fzf-claude-switch t popup -b rounded -T " test " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh test"
+	tmux bind -T "$chord_table" c popup -b rounded -T " claude " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh claude"
+	tmux bind -T "$chord_table" s popup -b rounded -T " server " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh server"
+	tmux bind -T "$chord_table" i popup -b rounded -T " index " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh index"
+	tmux bind -T "$chord_table" t popup -b rounded -T " test " -w "$width" -h "$height" -y 15 -E "$CURRENT_DIR/scripts/switch_session_window_pane.sh test"
 }
 
 # Like get_tmux_option, but an option explicitly set to "" stays empty instead of falling back
@@ -69,22 +76,56 @@ get_tmux_option_allow_empty() {
 	fi
 }
 
+# Removes every hub binding this plugin made earlier (in the chord, prefix or root table), so a
+# reload after changing the key or table, or after upgrading from prefix + h, leaves no stale
+# binding behind. Only bindings that run this plugin's hub scripts are touched; a key of your own
+# is left alone.
+function unbind_old_hub_bindings {
+	local table key
+	for table in "$chord_table" prefix root; do
+		tmux list-keys -T "$table" 2>/dev/null |
+			grep -E '/scripts/hub_(popup|mode)\.sh' |
+			awk -v t="$table" '{ for (i = 1; i < NF; i++) if ($i == "-T" && $(i + 1) == t) { print $(i + 2); break } }' |
+			while read -r key; do
+				[ -n "$key" ] && tmux unbind -T "$table" "$key" 2>/dev/null
+			done
+	done
+}
+
 function set_hub_bindings {
 	local key=$(get_tmux_option_allow_empty "$tmux_claude_option_hub_key" "$default_hub_key")
-	local without_prefix=$(get_tmux_option "$tmux_claude_option_hub_without_prefix" "$default_hub_without_prefix")
+	local table=$(get_tmux_option "$tmux_claude_option_hub_table" "")
+	local without_prefix=$(get_tmux_option "$tmux_claude_option_hub_without_prefix" false)
 
-	# Empty or "off" disables hub mode. Nothing is unbound, so a key of your own is left alone.
+	unbind_old_hub_bindings
+
+	# Empty or "off" disables hub mode
 	if [ -z "$key" ] || [ "$key" = off ]; then
 		return
 	fi
 
-	local table_flag=""
-	if [ "$without_prefix" = true ]; then
-		table_flag="-n"
+	# An explicit table wins; otherwise the older without-prefix option still means root
+	if [ -z "$table" ]; then
+		if [ "$without_prefix" = true ]; then
+			table=root
+		else
+			table=$default_hub_table
+		fi
 	fi
+
+	local -a where
+	case "$table" in
+		chord) where=(-T "$chord_table") ;;
+		prefix) where=(-T prefix) ;;
+		root) where=(-n) ;;
+		*)
+			tmux display-message "tmux-fzf-claude-switch: @fzf-claude-hub-table '$table' is not chord, prefix or root; using chord"
+			where=(-T "$chord_table")
+			;;
+	esac
 	# hub_popup.sh sizes the popup to the picker, then opens it on this client. run-shell expands
 	# the formats; -b so tmux does not wait on it.
-	tmux bind $table_flag "$key" run-shell -b "\"$CURRENT_DIR/scripts/hub_popup.sh\" '#{client_name}' '#{pane_id}'"
+	tmux bind "${where[@]}" "$key" run-shell -b "\"$CURRENT_DIR/scripts/hub_popup.sh\" '#{client_name}' '#{pane_id}'"
 }
 
 function main {
