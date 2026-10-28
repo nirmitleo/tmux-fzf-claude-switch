@@ -91,11 +91,13 @@ if [ "\$1" = help ]; then echo "  hub ls     list threads"; exit 0; fi
 echo "args=\$* (old)" >>"$LOG"
 EOF
 # fzf (for the C-k c / s switcher popups): shows a marker with its prompt on the popup, logs how
-# many rows it got, then exits 130 as if Esc was pressed, so nothing is switched or created.
+# many rows it got and its arguments, then exits 130 as if Esc was pressed, so nothing is switched
+# or created.
 cat >"$TMP/stub-new/fzf" <<EOF
 #!/bin/sh
 n=\$(wc -l | tr -d ' ')
 echo "fzf-rows=\$n" >>"$LOG"
+echo "fzf-args=\$*" >>"$LOG"
 echo "STUB-FZF-SWITCHER" >/dev/tty
 sleep 1.5
 exit 130
@@ -376,15 +378,15 @@ T new-window -d -t t -n server
 OLD=$(($(date +%s) - 7200))
 NOW_ISO=$(date -u -r "$OLD" +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -d "@$OLD" +%Y-%m-%dT%H:%M:%S.000Z)
 i=0
-make_session() { # make_session <pane index> <json extra fields> <title>
-  local pane_id sid pid
-  pane_id=$(T display -p -t "t:claude.$1" '#{pane_id}')
+make_session() { # make_session <pane index> <json extra fields> <title> [tmux session, default t]
+  local pane_id sid pid target="${4:-t}:claude.$1"
+  pane_id=$(T display -p -t "$target" '#{pane_id}')
   sleep 600 & pid=$!; disown "$pid"; SLEEPERS="$SLEEPERS $pid"
   i=$((i + 1)); sid="0000000$i-aaaa-bbbb-cccc-dddddddddddd"
   printf '{"pid":%s,"sessionId":"%s",%s,"tmux":"t:@1.%s","status":"idle","updatedAt":1}\n' \
     "$pid" "$sid" "$2" "$pane_id" >"$CFG/sessions/$pid.json"
   printf '{"type":"user","uuid":"u%s","timestamp":"%s"}\n' "$i" "$NOW_ISO" >"$CFG/projects/p/$sid.jsonl"
-  T select-pane -t "t:claude.$1" -T "$3"
+  T select-pane -t "$target" -T "$3"
 }
 make_session 0 '"cwd":"/w","name":"cc-hub-coord","nameSource":"peer"' "coord title"
 make_session 1 '"cwd":"/w","name":"cc-hub--tmux-hub-mode","nameSince":1,"agent":"thread-worker"' "thread title"
@@ -420,6 +422,111 @@ if git -C "$ROOT" show 81270c0:scripts/switch_session_window_pane.sh >"$TMP/base
   for n in 1 2 3 4 5 6 7 8 9 10; do list "$ROOT/scripts/switch_session_window_pane.sh" >/dev/null; done; t2=$(ms)
   echo "  info  --list with 5 Claude sessions, mean of 10: pre-hub $(((t1 - t0) / 10))ms, this branch $(((t2 - t1) / 10))ms"
 fi
+
+echo "== archived hub projects (\$CLAUDE_HUB/projects/<p>/.archived)"
+# Project "old" is archived. Its coordinator and a thread run in a tmux session whose name sorts
+# before "t" and is longer than the SESSION column's minimum, so a hidden row that still counted
+# would widen that column, and dropping the session from the colour list would recolour "t".
+mkdir -p "$HUBROOT/projects/old"
+echo 2026-10-28 >"$HUBROOT/projects/old/.archived"
+T new-session -d -s a-archived-proj -n claude -x 200 -y 50
+T split-window -t a-archived-proj:claude
+make_session 0 '"cwd":"/w","name":"old-coord","nameSource":"peer"' "old coord title" a-archived-proj
+make_session 1 '"cwd":"/w","name":"old--x","nameSince":1' "old thread title" a-archived-proj
+SWITCH="$ROOT/scripts/switch_session_window_pane.sh"
+list_mode() { # list_mode <on|off|""> -> the --list rows, ANSI kept
+  env TMUX="$TMUX_VAL" CLAUDE_CONFIG_DIR="$CFG" CLAUDE_HUB="$HUBROOT" "$SH" "$SWITCH" --list claude recent $1
+}
+raw_off=$(list_mode off); raw_on=$(list_mode on)
+rows=$(printf '%s\n' "$raw_off" | strip_ansi)
+check "archived project: coordinator row hidden by default" lacks "$rows" "old coord title"
+check "  ... thread row hidden too" lacks "$rows" "old thread title"
+check "  ... also when --list is given no archived argument" test "$(list_mode "")" = "$raw_off"
+check "non-archived hub project unaffected (hub:cc-hub coordinator)" contains "$(row 'coord title')" "hub:cc-hub  coord title"
+check "  ... and its thread" contains "$rows" "hub:cc-hub/tmux-hub-mode  thread title"
+check "  ... and hub:ent" contains "$rows" "hub:ent  cwd title"
+check "  ... non-hub rows still listed" contains "$rows" "former title"
+check "hidden rows do not widen the SESSION column" contains "$(printf '%s\n' "$rows" | head -n 1)" "SESSION  PANE"
+check "  ... nor change session colours ('t' keeps the second palette colour)" \
+  contains "$(printf '%s\n' "$raw_off" | grep -F 'coord title')" $'\033[38;5;170mt '
+rows_on=$(printf '%s\n' "$raw_on" | strip_ansi)
+check "on: archived coordinator listed, tagged 'hub:old archived'" contains "$rows_on" "hub:old archived  old coord title"
+check "  ... and the thread, 'hub:old/x archived'" contains "$rows_on" "hub:old/x archived  old thread title"
+check "  ... the whole title is dim" contains "$raw_on" $'\033[2mhub:old archived  old coord title\033[0m'
+check "  ... non-archived rows exactly as with off" \
+  test "$(printf '%s\n' "$rows_on" | grep -v 'archived' | sed 's/  */ /g')" = "$(printf '%s\n' "$rows" | sed 's/  */ /g')"
+check "  ... 2 more rows than off" test "$(printf '%s\n' "$raw_on" | wc -l)" -eq $(($(printf '%s\n' "$raw_off" | wc -l) + 2))
+touch "$HUBROOT/projects/ent/.archived"
+check "archived project found from the session's cwd (hub:ent) is hidden" lacks "$(list_mode off | strip_ansi)" "cwd title"
+rm "$HUBROOT/projects/ent/.archived"
+check "  ... and back, untagged as archived, once .archived is removed" contains "$(list_mode off | strip_ansi)" "hub:ent  cwd title"
+rm "$HUBROOT/projects/old/.archived"
+check "unarchive (rm .archived): old rows back with a plain tag" contains "$(list_mode off | strip_ansi)" "hub:old  old coord title"
+: >"$HUBROOT/projects/old/.archived"
+check "only existence matters: an empty .archived hides too" lacks "$(list_mode off | strip_ansi)" "old coord title"
+rm "$HUBROOT/projects/old/.archived"; mkdir "$HUBROOT/projects/old/.archived"
+check "  ... and so does a directory named .archived" lacks "$(list_mode off | strip_ansi)" "old coord title"
+rmdir "$HUBROOT/projects/old/.archived"; echo 2026-10-28 >"$HUBROOT/projects/old/.archived"
+
+# ctrl-s / ctrl-r handler: the prompt holds both states, each key flips one and keeps the other
+tr_out() { env FZF_PROMPT="$1" "$SH" "$SWITCH" --transform "$2" claude; }
+reload() { printf 'reload("%s" --list "claude" %s)' "$SWITCH" "$1"; }
+check "ctrl-r from 'recent ❯ ': shows archived" \
+  test "$(tr_out 'recent ❯ ' archived)" = "change-prompt(recent +archived ❯ )+$(reload 'recent on')"
+check "ctrl-s from 'recent +archived ❯ ': session order, archived kept" \
+  test "$(tr_out 'recent +archived ❯ ' sort)" = "change-prompt(session +archived ❯ )+$(reload 'session on')"
+check "ctrl-r from 'session +archived ❯ ': hides archived, session order kept" \
+  test "$(tr_out 'session +archived ❯ ' archived)" = "change-prompt(session ❯ )+$(reload 'session off')"
+check "ctrl-s from 'session ❯ ': back to recent, as before" \
+  test "$(tr_out 'session ❯ ' sort)" = "change-prompt(recent ❯ )+$(reload 'recent off')"
+
+echo "== archived, through C-k c in a real client"
+# The popup gets the tmux global environment, so the fake registry, hub root and stub fzf go there
+T set-environment -g PATH "$TMP/stub-new:$BASEPATH:$TMUXDIR"
+T set-environment -g CLAUDE_CONFIG_DIR "$CFG"
+T set-environment -g CLAUDE_HUB "$HUBROOT"
+T set -g default-shell /bin/sh
+TO kill-server 2>/dev/null
+TO new-session -d -s o -x 120 -y 40 "env -u TMUX tmux -L $SOCK attach -t t"
+wait_for attached || bad "inner client did not attach"
+press_c() { : >"$LOG"; TO send-keys -t o C-k c; wait_for popup_open "STUB-FZF-SWITCHER"; wait_for popup_closed "STUB-FZF-SWITCHER"; }
+press_c
+n_off=$(log_value fzf-rows)
+check "C-k c: header lists ctrl-r" contains "$(log_value fzf-args)" "ctrl-r: show/hide archived"
+check "  ... prompt 'recent ❯ ' (archived hidden)" contains "$(log_value fzf-args)" "--prompt=recent ❯  "
+T set -g @fzf-claude-show-archived on
+press_c
+n_on=$(log_value fzf-rows)
+check "@fzf-claude-show-archived on: 2 more rows ($n_off -> $n_on)" test "$n_on" -eq $((n_off + 2))
+check "  ... prompt starts as 'recent +archived ❯ '" contains "$(log_value fzf-args)" "--prompt=recent +archived ❯ "
+T set -gu @fzf-claude-show-archived
+T set-environment -g CLAUDE_HUB "$TMP/no-such-hub"
+press_c
+check "no hub installed: no ctrl-r key or hint" lacks "$(log_value fzf-args)" "ctrl-r"
+T set-environment -g CLAUDE_HUB "$HUBROOT"
+
+# The same with the real fzf, when it is installed: ctrl-r really reloads with archived rows
+REALFZF=$(PATH="${PATH#"$TMP/stub-new:"}" command -v fzf 2>/dev/null)
+if [ -n "$REALFZF" ]; then
+  T set-environment -g PATH "$(dirname "$REALFZF"):$BASEPATH:$TMUXDIR"
+  TO send-keys -t o C-k c
+  check "real fzf: C-k c lists the cc-hub coordinator" wait_for popup_open "hub:cc-hub  coord title"
+  check "  ... not the archived one" lacks "$(screen)" "old coord title"
+  TO send-keys -t o C-r
+  check "  ... ctrl-r shows it, tagged archived" wait_for popup_open "hub:old archived  old coord title"
+  check "  ... and the prompt says +archived" contains "$(screen)" "recent +archived"
+  TO send-keys -t o C-s
+  check "  ... ctrl-s then keeps archived shown (session order)" wait_for popup_open "session +archived"
+  check "  ... rows still there" contains "$(screen)" "old coord title"
+  TO send-keys -t o C-r
+  wait_for popup_open "session ❯"
+  check "  ... ctrl-r again hides them (still session order)" lacks "$(screen)" "old coord title"
+  TO send-keys -t o C-g
+  check "  ... C-g closes the popup" wait_for popup_closed "session ❯"
+else
+  echo "  skip  real fzf checks (fzf not installed)"
+fi
+TO kill-server 2>/dev/null
 
 echo
 echo "$PASS passed, $FAIL failed ($SH: $("$SH" -c 'echo $BASH_VERSION'))"
