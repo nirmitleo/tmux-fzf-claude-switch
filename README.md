@@ -11,6 +11,7 @@ This is a customized tmux session/window/pane switcher optimized for Claude Code
    - `Ctrl+K` → `s` — panes in windows named `server`
    - `Ctrl+K` → `i` — panes in windows named `index`
    - `Ctrl+K` → `t` — panes in windows named `test`
+   - `Ctrl+K` → `h` — [hub mode](#hub-mode)
    - Any other key after `Ctrl+K` — silently exits (tmux default behavior)
 2. **Pane-level switching**: Switch directly to specific panes, not just windows
 3. **Clean display format**: aligned columns with Claude's working/idle status and time since the last message
@@ -18,7 +19,7 @@ This is a customized tmux session/window/pane switcher optimized for Claude Code
 4. **No-prefix keybinding**: Default is `Ctrl+K` (no prefix required)
 5. **Fuzzy search** with fzf for fast navigation
 6. **Create new sessions** if the name doesn't exist
-7. **Hub mode**: `prefix + h` opens the [cc-hub](#hub-mode) picker (projects, coordinators, threads) in a popup
+7. **Hub mode**: `Ctrl+K` → `h` opens the [cc-hub](#hub-mode) picker (projects, coordinators, threads) in a popup
    - Claude panes that belong to a hub project get a dim `hub:<project>` or `hub:<project>/<thread>` tag
      in the `Ctrl+K` → `c` switcher
 
@@ -60,13 +61,18 @@ it is not shown or searched.
 sessions that share a memory. Bare `hub` opens an fzf picker of every project with its
 coordinator and threads, in the style of `claude agents`.
 
-Press `prefix + h` (with the tmux prefix) from anywhere in tmux to open that picker in a popup.
+Press `Ctrl+K` then `h` (the same chord as `c`/`s`/`i`/`t`) from anywhere in tmux to open that
+picker in a popup.
 The popup runs `hub --tmux`: choosing a session switches to the tmux pane where it is already
 open, or opens a new tmux window running it, and the popup closes.
 
 - Needs a `hub` that supports `--tmux` (its `hub help` lists `--tmux`). hub is looked up on the
   popup's `PATH`, then at `$CLAUDE_HUB/bin/hub` and `~/claude-hub/bin/hub`. If it is missing or
   too old, the popup says so and waits for a key.
+- The popup is sized to the picker. `hub --tmux-size <maxcols> <maxrows>` is asked how much room the
+  picker needs (inside the border) and the popup is opened at that size, never larger than the
+  width/height options below, which are maximums. A hub without `--tmux-size` (not in its `hub help`),
+  or one that fails, prints something unexpected or takes over 2 seconds, gets the maximum size.
 - `CLAUDE_HUB` (the hub root, default `~/claude-hub`) is passed through, including when it is only
   set in the tmux environment (`tmux set-environment -g CLAUDE_HUB ...`).
 - In the `Ctrl+K` → `c` switcher, a Claude pane whose session is a hub coordinator (`<project>-coord`)
@@ -78,13 +84,26 @@ Options (defaults shown):
 
 ```bash
 set -g @fzf-claude-hub-key 'h'                 # '' or 'off' disables hub mode
-set -g @fzf-claude-hub-without-prefix 'false'  # 'true' binds the key without the prefix
-set -g @fzf-claude-hub-width '90%'
-set -g @fzf-claude-hub-height '85%'
+set -g @fzf-claude-hub-table 'chord'           # chord: Ctrl+K then the key; prefix: prefix + key;
+                                               # root: the key alone, no prefix
+set -g @fzf-claude-hub-autosize 'on'           # 'off' always opens the popup at the maximum size
+set -g @fzf-claude-hub-width '90%'             # maximum popup width: a % of the client or columns
+set -g @fzf-claude-hub-height '85%'            # maximum popup height: a % of the client or rows
 ```
 
-Turning hub mode off never unbinds anything, so a `prefix + h` of your own keeps working. After
-changing an option, reload the plugin (`tmux source ~/.tmux.conf` or `prefix + I`).
+In the chord table, pick a key other than `c`, `s`, `i` and `t`, or hub mode replaces that filter.
+`@fzf-claude-hub-without-prefix 'true'`, from earlier versions, still works and means `root`; an
+explicit `@fzf-claude-hub-table` wins over it. To keep the old `prefix + h`:
+
+```bash
+set -g @fzf-claude-hub-table 'prefix'
+```
+
+On each load the plugin first removes the hub binding it made before (in any of the three tables),
+so changing the key or table, turning hub mode off, or upgrading from `prefix + h` leaves nothing
+stale behind. A key of your own (one that does not run this plugin's hub scripts) is never
+unbound. The key options need a plugin reload (`tmux source ~/.tmux.conf` or `prefix + I`). The
+size options are read each time you press the key.
 
 ## Requirements
 
@@ -105,6 +124,7 @@ changing an option, reload the plugin (`tmux source ~/.tmux.conf` or `prefix + I
     | `s` | windows named `server` |
     | `i` | windows named `index` |
     | `t` | windows named `test` |
+    | `h` | [hub mode](#hub-mode) (the cc-hub picker) |
     | any other key | exits silently |
   - Type to fuzzy search through the filtered list
   - Press Enter to switch to the selected pane
@@ -116,8 +136,8 @@ changing an option, reload the plugin (`tmux source ~/.tmux.conf` or `prefix + I
 
 `tests/run.sh` drives the plugin in throwaway tmux servers (sockets `hubmodetest` and
 `hubmodetest-outer`, `-f /dev/null`), so your own tmux server and config are not touched. It checks
-the key bindings, `hub_mode.sh` with stub `hub` executables, a real `prefix + h` through an attached
-client, and the hub tag against a fake `CLAUDE_CONFIG_DIR`. Run it with both bashes, since tmux
+the key bindings, `hub_mode.sh` with stub `hub` executables, real `Ctrl+K` `h`/`c`/`s` presses through
+an attached client, and the hub tag against a fake `CLAUDE_CONFIG_DIR`. Run it with both bashes, since tmux
 `run-shell` may use macOS's bash 3.2:
 
 ```bash
