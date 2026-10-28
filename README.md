@@ -85,9 +85,10 @@ open, or opens a new tmux window running it, and the popup closes.
 
 ### Archived projects
 
-A hub project is archived when the file `$CLAUDE_HUB/projects/<project>/.archived` exists. `hub
-archive <project>` creates it and `hub unarchive <project>` removes it; by hand, `touch` and `rm`
-do the same. Only the file's existence matters (hub writes the date into it).
+A hub project is archived when the file `$CLAUDE_HUB/projects/<project>/.archived` exists. hub's
+`hub archive <project>` and `hub unarchive <project>` (in hub versions that have them) create and
+remove it; `touch` and `rm` do the same by hand. Only the file's existence matters (hub writes the
+date into it).
 
 Archiving only hides. In the `Ctrl+K` switchers (`c`, and `s`/`i`/`t` when a Claude pane sits in
 such a window), the panes of an archived project's coordinator, threads and other sessions are left
@@ -98,6 +99,9 @@ reach them:
   and tagged `hub:<project> archived` (type `archived` to find them). `ctrl-s` keeps the choice.
 - Or set `@fzf-claude-show-archived` to `on` to show them every time the switcher opens (`ctrl-r`
   still hides them). It is read each time the popup opens, so no reload is needed.
+
+If every row is archived, the popup still opens (empty, with the `ctrl-r` hint) instead of closing
+straight away.
 
 Hub mode (`Ctrl+K` → `h`) is not filtered by the plugin: `hub --tmux` decides what its picker shows.
 

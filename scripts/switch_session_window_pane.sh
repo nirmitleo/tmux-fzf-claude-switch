@@ -238,7 +238,8 @@ function main {
   local pane_target
   local show_archived=off
   local header='ctrl-s: switch sort (recent / session)'
-  local -a archived_bind=()
+  local -a archived_bind=() exit_0=(--exit-0)
+  local rows
 
   # ctrl-s flips between the two sort modes and, with hub installed, ctrl-r shows or hides archived
   # hub projects; the prompt shows which mode is active
@@ -247,8 +248,15 @@ function main {
     header="$header  ctrl-r: show/hide archived"
     archived_bind=(--bind="ctrl-r:transform:\"$self\" --transform archived \"$filter_name\"")
   fi
-  sessions=$(list_panes "$filter_name" recent "$show_archived" |
-    fzf --exit-0 --print-query --reverse --ansi \
+  rows=$(list_panes "$filter_name" recent "$show_archived")
+  # --exit-0 closes the popup at once when nothing is listed. If that is only because every row is
+  # archived, keep it open, so ctrl-r (and the hint in the header) can still show them.
+  if [ "$show_archived" = off ] && [ "$(printf '%s\n' "$rows" | wc -l)" -le 1 ] &&
+    [ -n "${archived_bind[*]+set}" ] && [ "$(list_panes "$filter_name" recent on | wc -l)" -gt 1 ]; then
+    exit_0=()
+  fi
+  sessions=$(printf '%s\n' "$rows" |
+    fzf ${exit_0[@]+"${exit_0[@]}"} --print-query --reverse --ansi \
       --delimiter=$'\t' --with-nth=2.. --tiebreak=index \
       --prompt="$(prompt_for recent "$show_archived")" --pointer='▌' --info=inline-right --no-scrollbar --highlight-line \
       --header-lines=1 --header="$header" \

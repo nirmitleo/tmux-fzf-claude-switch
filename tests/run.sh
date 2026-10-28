@@ -500,6 +500,17 @@ n_on=$(log_value fzf-rows)
 check "@fzf-claude-show-archived on: 2 more rows ($n_off -> $n_on)" test "$n_on" -eq $((n_off + 2))
 check "  ... prompt starts as 'recent +archived ❯ '" contains "$(log_value fzf-args)" "--prompt=recent +archived ❯ "
 T set -gu @fzf-claude-show-archived
+check "  ... fzf runs with --exit-0 when rows are listed" contains "$(log_value fzf-args)" "--exit-0"
+# Every Claude pane archived (only the "claude" window counts): the popup must stay open for ctrl-r
+for d in cc-hub ent; do touch "$HUBROOT/projects/$d/.archived"; done
+# Close the panes without a hub tag (by title: indexes shift as panes close), so every row is archived
+for title in "former title" "nodir title" "not claude"; do
+  T kill-pane -t "$(T list-panes -t t:claude -F '#{pane_id} #{pane_title}' | sed -n "s/^\(%[0-9]*\) $title\$/\1/p")"
+done
+press_c
+check "every row archived: fzf gets only the header" test "$(log_value fzf-rows)" -eq 1
+check "  ... and no --exit-0, so the popup stays open for ctrl-r" lacks "$(log_value fzf-args)" "--exit-0"
+for d in cc-hub ent; do rm "$HUBROOT/projects/$d/.archived"; done
 T set-environment -g CLAUDE_HUB "$TMP/no-such-hub"
 press_c
 check "no hub installed: no ctrl-r key or hint" lacks "$(log_value fzf-args)" "ctrl-r"
@@ -519,8 +530,8 @@ if [ -n "$REALFZF" ]; then
   check "  ... ctrl-s then keeps archived shown (session order)" wait_for popup_open "session +archived"
   check "  ... rows still there" contains "$(screen)" "old coord title"
   TO send-keys -t o C-r
-  wait_for popup_open "session ❯"
-  check "  ... ctrl-r again hides them (still session order)" lacks "$(screen)" "old coord title"
+  old_gone() { popup_open "session ❯" && popup_closed "old coord title"; }
+  check "  ... ctrl-r again hides them (still session order)" wait_for old_gone
   TO send-keys -t o C-g
   check "  ... C-g closes the popup" wait_for popup_closed "session ❯"
 else
