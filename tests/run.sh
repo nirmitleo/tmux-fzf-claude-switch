@@ -90,6 +90,22 @@ cat >"$TMP/stub-old/hub" <<EOF
 if [ "\$1" = help ]; then echo "  hub ls     list threads"; exit 0; fi
 echo "args=\$* (old)" >>"$LOG"
 EOF
+# hub-tidy:  a hub whose help lists `hub tidy`. `hub tidy` logs its args, TMUX_PANE and CLAUDE_HUB,
+#            then prints two lines and exits 0, or with $TMP/tidy-mode "fail" says boom and exits 2.
+mkdir -p "$TMP/stub-tidy"
+cat >"$TMP/stub-tidy/hub" <<EOF
+#!/bin/sh
+if [ "\$1" = help ]; then printf '  hub --tmux           the picker\n  hub tidy [<project>]  rebuild the layout\n'; exit 0; fi
+if [ "\$1" = tidy ]; then
+  echo "tidy-args=\$* pane=\${TMUX_PANE:-} CLAUDE_HUB=\${CLAUDE_HUB:-}" >>"$LOG"
+  if [ "\$(cat "$TMP/tidy-mode" 2>/dev/null)" = fail ]; then echo "boom: no coordinator pane"; exit 2; fi
+  echo "Tidied \$2: 2 thread panes on the right."
+  echo "  Closed 1 finished pane."
+  exit 0
+fi
+echo "args=\$*" >>"$LOG"
+EOF
+chmod +x "$TMP/stub-tidy/hub"
 # fzf (for the C-k c / s switcher popups): shows a marker with its prompt on the popup, logs how
 # many rows it got and its arguments, then exits 130 as if Esc was pressed, so nothing is switched
 # or created.
@@ -113,7 +129,7 @@ done
 
 echo "== bindings"
 CHORD=fzf-claude-switch
-hub_keys() { T list-keys 2>/dev/null | grep hub_; } # every hub binding, in any table
+hub_keys() { T list-keys 2>/dev/null | grep -E 'hub_(popup|mode)'; } # every hub mode binding, in any table
 fresh_server
 k=$(T list-keys -T $CHORD h 2>&1)
 check "C-k h: hub key bound in the chord table by default, to run-shell -b" contains "$k" "run-shell -b"
@@ -159,6 +175,33 @@ check "@fzf-claude-hub-key '': no hub binding" test -z "$(hub_keys)"
 fresh_server @fzf-claude-hub-key off @fzf-claude-hub-table prefix
 check "  ... off with a table set: still no hub binding" test -z "$(hub_keys)"
 
+tidy_keys() { T list-keys 2>/dev/null | grep hub_tidy; }
+fresh_server
+k=$(T list-keys -T $CHORD l 2>&1)
+check "C-k l: tidy key bound in the chord table by default, to run-shell -b" contains "$k" "run-shell -b"
+check "  ... running hub_tidy.sh with this client and pane" \
+  contains "$k" "$ROOT/scripts/hub_tidy.sh\\\" '#{client_name}' '#{pane_id}'"
+check "  ... exactly one tidy binding, none in prefix or root" test "$(tidy_keys | wc -l)" -eq 1
+fresh_server @fzf-claude-tidy-key L
+check "@fzf-claude-tidy-key changes the key (C-k L)" contains "$(T list-keys -T $CHORD L 2>&1)" "hub_tidy.sh"
+check "  ... and C-k l is left unbound" test -z "$(T list-keys -T $CHORD l 2>/dev/null)"
+fresh_server @fzf-claude-tidy-key off
+check "@fzf-claude-tidy-key off: no tidy binding" test -z "$(tidy_keys)"
+fresh_server @fzf-claude-tidy-key ''
+check "@fzf-claude-tidy-key '': no tidy binding" test -z "$(tidy_keys)"
+check "  ... hub mode still bound" test "$(hub_keys | wc -l)" -eq 1
+fresh_server @fzf-claude-hub-key off
+check "@fzf-claude-hub-key off leaves the tidy key bound" test "$(tidy_keys | wc -l)" -eq 1
+fresh_server
+T set -g @fzf-claude-tidy-key L; T run-shell "$SH '$ROOT/main.tmux'"
+check "reload after changing the tidy key: only C-k L" \
+  test "$(tidy_keys | wc -l)" -eq 1 -a -z "$(T list-keys -T $CHORD l 2>/dev/null)"
+T set -g @fzf-claude-tidy-key off; T run-shell "$SH '$ROOT/main.tmux'"
+check "reload after turning the tidy key off: no tidy binding left" test -z "$(tidy_keys)"
+fresh_server @fzf-claude-tidy-key off
+T bind -T $CHORD l display-message mytidy; T run-shell "$SH '$ROOT/main.tmux'"
+check "a C-k l of your own is kept when the tidy key is off" contains "$(T list-keys -T $CHORD l 2>&1)" "display-message mytidy"
+
 # Reloads: the plugin removes hub bindings it made earlier, never a binding of your own
 fresh_server
 T bind h run-shell -b "\"/old/plugin/scripts/hub_mode.sh\""   # what the previous version bound
@@ -184,8 +227,8 @@ check "  ... also when hub mode is on (it uses C-k h)" contains "$(T list-keys -
 mkdir -p "$TMP/base"
 if git -C "$ROOT" show origin/main:main.tmux >"$TMP/base/main.tmux" 2>/dev/null; then
   fresh_server
-  # Apart from the new h (hub mode) line, which origin/main binds as prefix + h instead
-  ours=$( { T list-keys -T root C-k; T list-keys -T fzf-claude-switch; } | grep -v hub_popup.sh | sed "s|$ROOT|ROOT|g")
+  # Apart from the new h (hub mode) and l (tidy) lines, which origin/main binds as prefix + h instead
+  ours=$( { T list-keys -T root C-k; T list-keys -T fzf-claude-switch; } | grep -vE 'hub_(popup|tidy)\.sh' | sed "s|$ROOT|ROOT|g")
   T kill-server 2>/dev/null; T new-session -d -s t
   T run-shell "$SH '$TMP/base/main.tmux'"
   base=$( { T list-keys -T root C-k; T list-keys -T fzf-claude-switch; } | grep -v 'hub_' | sed "s|$TMP/base|ROOT|g")
@@ -423,7 +466,7 @@ if git -C "$ROOT" show 81270c0:scripts/switch_session_window_pane.sh >"$TMP/base
   echo "  info  --list with 5 Claude sessions, mean of 10: pre-hub $(((t1 - t0) / 10))ms, this branch $(((t2 - t1) / 10))ms"
 fi
 
-echo "== archived hub projects (\$CLAUDE_HUB/projects/<p>/.archived)"
+echo "== resolved hub projects (\$CLAUDE_HUB/projects/<p>/.archived)"
 # Project "old" is archived. Its coordinator and a thread run in a tmux session whose name sorts
 # before "t" and is longer than the SESSION column's minimum, so a hidden row that still counted
 # would widen that column, and dropping the session from the colour list would recolour "t".
@@ -450,11 +493,11 @@ check "hidden rows do not widen the SESSION column" contains "$(printf '%s\n' "$
 check "  ... nor change session colours ('t' keeps the second palette colour)" \
   contains "$(printf '%s\n' "$raw_off" | grep -F 'coord title')" $'\033[38;5;170mt '
 rows_on=$(printf '%s\n' "$raw_on" | strip_ansi)
-check "on: archived coordinator listed, tagged 'hub:old archived'" contains "$rows_on" "hub:old archived  old coord title"
-check "  ... and the thread, 'hub:old/x archived'" contains "$rows_on" "hub:old/x archived  old thread title"
-check "  ... the whole title is dim" contains "$raw_on" $'\033[2mhub:old archived  old coord title\033[0m'
+check "on: resolved coordinator listed, tagged 'hub:old resolved'" contains "$rows_on" "hub:old resolved  old coord title"
+check "  ... and the thread, 'hub:old/x resolved'" contains "$rows_on" "hub:old/x resolved  old thread title"
+check "  ... the whole title is dim" contains "$raw_on" $'\033[2mhub:old resolved  old coord title\033[0m'
 check "  ... non-archived rows exactly as with off" \
-  test "$(printf '%s\n' "$rows_on" | grep -v 'archived' | sed 's/  */ /g')" = "$(printf '%s\n' "$rows" | sed 's/  */ /g')"
+  test "$(printf '%s\n' "$rows_on" | grep -v 'resolved' | sed 's/  */ /g')" = "$(printf '%s\n' "$rows" | sed 's/  */ /g')"
 check "  ... 2 more rows than off" test "$(printf '%s\n' "$raw_on" | wc -l)" -eq $(($(printf '%s\n' "$raw_off" | wc -l) + 2))
 touch "$HUBROOT/projects/ent/.archived"
 check "archived project found from the session's cwd (hub:ent) is hidden" lacks "$(list_mode off | strip_ansi)" "cwd title"
@@ -471,16 +514,18 @@ rmdir "$HUBROOT/projects/old/.archived"; echo 2026-10-28 >"$HUBROOT/projects/old
 # ctrl-s / ctrl-r handler: the prompt holds both states, each key flips one and keeps the other
 tr_out() { env FZF_PROMPT="$1" "$SH" "$SWITCH" --transform "$2" claude; }
 reload() { printf 'reload("%s" --list "claude" %s)' "$SWITCH" "$1"; }
-check "ctrl-r from 'recent ❯ ': shows archived" \
-  test "$(tr_out 'recent ❯ ' archived)" = "change-prompt(recent +archived ❯ )+$(reload 'recent on')"
-check "ctrl-s from 'recent +archived ❯ ': session order, archived kept" \
-  test "$(tr_out 'recent +archived ❯ ' sort)" = "change-prompt(session +archived ❯ )+$(reload 'session on')"
-check "ctrl-r from 'session +archived ❯ ': hides archived, session order kept" \
-  test "$(tr_out 'session +archived ❯ ' archived)" = "change-prompt(session ❯ )+$(reload 'session off')"
+check "ctrl-r from 'recent ❯ ': shows resolved" \
+  test "$(tr_out 'recent ❯ ' archived)" = "change-prompt(recent +resolved ❯ )+$(reload 'recent on')"
+check "ctrl-s from 'recent +resolved ❯ ': session order, resolved kept" \
+  test "$(tr_out 'recent +resolved ❯ ' sort)" = "change-prompt(session +resolved ❯ )+$(reload 'session on')"
+check "ctrl-r from 'session +resolved ❯ ': hides resolved, session order kept" \
+  test "$(tr_out 'session +resolved ❯ ' archived)" = "change-prompt(session ❯ )+$(reload 'session off')"
+check "the old '+archived' prompt is no longer read as 'shown'" \
+  test "$(tr_out 'recent +archived ❯ ' sort)" = "change-prompt(session ❯ )+$(reload 'session off')"
 check "ctrl-s from 'session ❯ ': back to recent, as before" \
   test "$(tr_out 'session ❯ ' sort)" = "change-prompt(recent ❯ )+$(reload 'recent off')"
 
-echo "== archived, through C-k c in a real client"
+echo "== resolved, through C-k c in a real client"
 # The popup gets the tmux global environment, so the fake registry, hub root and stub fzf go there
 T set-environment -g PATH "$TMP/stub-new:$BASEPATH:$TMUXDIR"
 T set-environment -g CLAUDE_CONFIG_DIR "$CFG"
@@ -492,13 +537,21 @@ wait_for attached || bad "inner client did not attach"
 press_c() { : >"$LOG"; TO send-keys -t o C-k c; wait_for popup_open "STUB-FZF-SWITCHER"; wait_for popup_closed "STUB-FZF-SWITCHER"; }
 press_c
 n_off=$(log_value fzf-rows)
-check "C-k c: header lists ctrl-r" contains "$(log_value fzf-args)" "ctrl-r: show/hide archived"
-check "  ... prompt 'recent ❯ ' (archived hidden)" contains "$(log_value fzf-args)" "--prompt=recent ❯  "
-T set -g @fzf-claude-show-archived on
+check "C-k c: header lists ctrl-r" contains "$(log_value fzf-args)" "ctrl-r: show/hide resolved"
+check "  ... prompt 'recent ❯ ' (resolved hidden)" contains "$(log_value fzf-args)" "--prompt=recent ❯  "
+T set -g @fzf-claude-show-resolved on
 press_c
 n_on=$(log_value fzf-rows)
-check "@fzf-claude-show-archived on: 2 more rows ($n_off -> $n_on)" test "$n_on" -eq $((n_off + 2))
-check "  ... prompt starts as 'recent +archived ❯ '" contains "$(log_value fzf-args)" "--prompt=recent +archived ❯ "
+check "@fzf-claude-show-resolved on: 2 more rows ($n_off -> $n_on)" test "$n_on" -eq $((n_off + 2))
+check "  ... prompt starts as 'recent +resolved ❯ '" contains "$(log_value fzf-args)" "--prompt=recent +resolved ❯ "
+T set -gu @fzf-claude-show-resolved
+T set -g @fzf-claude-show-archived on
+press_c
+check "@fzf-claude-show-archived on (older name) still works: 2 more rows" test "$(log_value fzf-rows)" -eq $((n_off + 2))
+T set -g @fzf-claude-show-resolved off
+press_c
+check "  ... but an explicit @fzf-claude-show-resolved off wins over it" test "$(log_value fzf-rows)" -eq "$n_off"
+T set -gu @fzf-claude-show-resolved
 T set -gu @fzf-claude-show-archived
 check "  ... fzf runs with --exit-0 when rows are listed" contains "$(log_value fzf-args)" "--exit-0"
 # Every Claude pane archived (only the "claude" window counts): the popup must stay open for ctrl-r
@@ -524,10 +577,10 @@ if [ -n "$REALFZF" ]; then
   check "real fzf: C-k c lists the cc-hub coordinator" wait_for popup_open "hub:cc-hub  coord title"
   check "  ... not the archived one" lacks "$(screen)" "old coord title"
   TO send-keys -t o C-r
-  check "  ... ctrl-r shows it, tagged archived" wait_for popup_open "hub:old archived  old coord title"
-  check "  ... and the prompt says +archived" contains "$(screen)" "recent +archived"
+  check "  ... ctrl-r shows it, tagged resolved" wait_for popup_open "hub:old resolved  old coord title"
+  check "  ... and the prompt says +resolved" contains "$(screen)" "recent +resolved"
   TO send-keys -t o C-s
-  check "  ... ctrl-s then keeps archived shown (session order)" wait_for popup_open "session +archived"
+  check "  ... ctrl-s then keeps resolved shown (session order)" wait_for popup_open "session +resolved"
   check "  ... rows still there" contains "$(screen)" "old coord title"
   TO send-keys -t o C-r
   old_gone() { popup_open "session ❯" && popup_closed "old coord title"; }
@@ -537,6 +590,105 @@ if [ -n "$REALFZF" ]; then
 else
   echo "  skip  real fzf checks (fzf not installed)"
 fi
+TO kill-server 2>/dev/null
+
+echo "== tidy (C-k l, hub_tidy.sh)"
+# The registry and hub root from the sections above: pane "coord title" runs the Claude session
+# cc-hub-coord, projects cc-hub, ent and old exist. Extra panes and windows carry the other cases.
+T kill-session -t a-archived-proj 2>/dev/null
+P_COORD=$(T list-panes -t t:claude -F '#{pane_id} #{pane_title}' | sed -n 's/ coord title$//p')
+T new-window -d -t t -n work
+P_THREAD=$(T display -p -t t:work '#{pane_id}')
+T set -p -t "$P_THREAD" @hub_thread cc-hub--layout
+P_ANCHOR=$(T split-window -d -P -F '#{pane_id}' -t "$P_THREAD")
+P_SIB=$(T split-window -d -P -F '#{pane_id}' -t "$P_ANCHOR")
+T set -p -t "$P_SIB" @hub_thread ent--y; T set -p -t "$P_SIB" @hub_coord "$P_ANCHOR"
+P_WIN=$(T new-window -d -P -F '#{pane_id}' -t t -n ent--z)
+P_NOPE=$(T new-window -d -P -F '#{pane_id}' -t t -n nope--z)
+P_PLAIN=$(T display -p -t t:server '#{pane_id}')
+T new-session -d -s old-coord -x 120 -y 40
+P_SESS=$(T display -p -t old-coord '#{pane_id}')
+T set -g default-shell /bin/sh
+T set-environment -g CLAUDE_CONFIG_DIR "$CFG"
+T set-environment -g CLAUDE_HUB "$HUBROOT"
+T set-environment -g PATH "$TMP/stub-tidy:$BASEPATH:$TMUXDIR"
+TO kill-server 2>/dev/null
+TO new-session -d -s o -x 120 -y 40 "env -u TMUX tmux -L $SOCK attach -t t"
+wait_for attached || bad "inner client did not attach"
+CLIENT=$(T list-clients -F '#{client_name}' | head -n 1)
+TMUX_VAL="$(T display -p '#{socket_path}'),$(T display -p '#{pid}'),0"
+last_msg() { T show-messages 2>/dev/null | grep -m 1 ' message: '; } # the log lists newest first
+tidy() { # tidy <stub dir or ""> <pane>: runs hub_tidy.sh directly; sets RC
+  : >"$LOG"
+  env -i HOME="$TMP/home" PATH="${1:+$1:}$BASEPATH:$TMUXDIR" TMUX="$TMUX_VAL" \
+    CLAUDE_HUB="$HUBROOT" CLAUDE_CONFIG_DIR="$CFG" "$SH" "$ROOT/scripts/hub_tidy.sh" "$CLIENT" "$2" </dev/null >/dev/null 2>&1
+  RC=$?
+}
+logged() { log_value tidy-args; }
+rm -f "$TMP/tidy-mode"
+tidy "$TMP/stub-tidy" "$P_THREAD"
+check "pane tagged @hub_thread cc-hub--layout: runs 'hub tidy cc-hub'" test "$(logged)" = "tidy cc-hub pane=$P_THREAD CLAUDE_HUB=$HUBROOT"
+check "  ... shows hub's output as one message" contains "$(last_msg)" "Tidied cc-hub: 2 thread panes on the right. · Closed 1 finished pane."
+check "  ... exits 0" test "$RC" = 0
+tidy "$TMP/stub-tidy" "$P_ANCHOR"
+check "untagged pane that a thread pane's @hub_coord names: its thread's project (ent)" contains "$(logged)" "tidy ent pane=$P_ANCHOR "
+tidy "$TMP/stub-tidy" "$P_COORD"
+check "pane running the Claude session cc-hub-coord: cc-hub" contains "$(logged)" "tidy cc-hub pane=$P_COORD "
+tidy "$TMP/stub-tidy" "$P_WIN"
+check "window named ent--z: ent" contains "$(logged)" "tidy ent pane=$P_WIN "
+tidy "$TMP/stub-tidy" "$P_SESS"
+check "session named old-coord: old" contains "$(logged)" "tidy old pane=$P_SESS "
+tidy "$TMP/stub-tidy" "$P_NOPE"
+check "window nope--z, but no hub project 'nope': not run" test -z "$(logged)"
+check "  ... says the pane is not part of a hub project" contains "$(last_msg)" "not part of a hub project"
+tidy "$TMP/stub-tidy" "$P_PLAIN"
+check "plain pane: not run, same message, exit 0" test -z "$(logged)" -a "$RC" = 0
+check "  ... message shown" contains "$(last_msg)" "not part of a hub project"
+tidy "$TMP/stub-new" "$P_THREAD"
+check "hub without 'hub tidy' in its help: not run" test -z "$(logged)$(cat "$LOG")"
+check "  ... says 'update hub: hub tidy not available'" contains "$(last_msg)" "update hub: hub tidy not available"
+check "  ... exits 0" test "$RC" = 0
+tidy "" "$P_THREAD"
+check "no hub: says hub is not installed, exits 0" test "$RC" = 0
+check "  ... message shown" contains "$(last_msg)" "hub is not installed"
+echo fail >"$TMP/tidy-mode"
+tidy "$TMP/stub-tidy" "$P_THREAD"
+check "hub tidy fails: says so with its output" contains "$(last_msg)" "hub tidy cc-hub failed (exit 2): boom: no coordinator pane"
+check "  ... and still exits 0" test "$RC" = 0
+rm -f "$TMP/tidy-mode"
+
+# Real key presses on the attached client
+T select-window -t t:work; T select-pane -t "$P_THREAD"
+: >"$LOG"
+TO send-keys -t o C-k l
+has_log() { test -n "$(logged)"; }
+check "C-k l in the cc-hub thread pane runs hub tidy cc-hub" wait_for has_log
+check "  ... for that pane" contains "$(logged)" "tidy cc-hub pane=$P_THREAD "
+check "  ... the message is on the status line" wait_for popup_open "Tidied cc-hub"
+sleep 0.3
+check "  ... pane not in view-mode" test -z "$(T display -p -t "$P_THREAD" '#{pane_mode}')"
+T set-environment -g PATH "$TMP/stub-new:$BASEPATH:$TMUXDIR"
+: >"$LOG"
+TO send-keys -t o C-k l
+check "C-k l with an old hub: 'update hub' message" wait_for popup_open "update hub: hub tidy not available"
+sleep 0.3
+check "  ... pane not in view-mode" test -z "$(T display -p -t "$P_THREAD" '#{pane_mode}')"
+TO send-keys -t o C-k c
+check "  ... and the next key works (C-k c opens the switcher)" wait_for popup_open "STUB-FZF-SWITCHER"
+wait_for popup_closed "STUB-FZF-SWITCHER"
+T set-environment -g PATH "$TMP/stub-tidy:$BASEPATH:$TMUXDIR"
+echo fail >"$TMP/tidy-mode"
+T select-window -t t:server
+TO send-keys -t o C-k l
+check "C-k l on a plain pane: 'not part of a hub project'" wait_for popup_open "not part of a hub project"
+sleep 0.3
+check "  ... pane not in view-mode" test -z "$(T display -p -t "$P_PLAIN" '#{pane_mode}')"
+T select-window -t t:work
+TO send-keys -t o C-k l
+check "C-k l when hub tidy fails: the failure message" wait_for popup_open "failed (exit 2)"
+sleep 0.3
+check "  ... pane not in view-mode" test -z "$(T display -p -t "$P_THREAD" '#{pane_mode}')"
+rm -f "$TMP/tidy-mode"
 TO kill-server 2>/dev/null
 
 echo

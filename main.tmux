@@ -27,6 +27,12 @@ tmux_claude_option_hub_key="@fzf-claude-hub-key"
 tmux_claude_option_hub_table="@fzf-claude-hub-table"
 tmux_claude_option_hub_without_prefix="@fzf-claude-hub-without-prefix"
 
+# Tidy: C-k l runs `hub tidy <project>` for the project of the current pane (scripts/hub_tidy.sh),
+# which puts that project's coordinator on the left and its thread panes in one column on the right.
+# @fzf-claude-tidy-key changes the key; '' or 'off' leaves it unbound.
+default_tidy_key="l"
+tmux_claude_option_tidy_key="@fzf-claude-tidy-key"
+
 get_tmux_option() {
 	local option=$1
 	local default_value=$2
@@ -76,15 +82,15 @@ get_tmux_option_allow_empty() {
 	fi
 }
 
-# Removes every hub binding this plugin made earlier (in the chord, prefix or root table), so a
-# reload after changing the key or table, or after upgrading from prefix + h, leaves no stale
+# Removes every hub and tidy binding this plugin made earlier (in the chord, prefix or root table),
+# so a reload after changing a key or table, or after upgrading from prefix + h, leaves no stale
 # binding behind. Only bindings that run this plugin's hub scripts are touched; a key of your own
 # is left alone.
 function unbind_old_hub_bindings {
 	local table key
 	for table in "$chord_table" prefix root; do
 		tmux list-keys -T "$table" 2>/dev/null |
-			grep -E '/scripts/hub_(popup|mode)\.sh' |
+			grep -E '/scripts/hub_(popup|mode|tidy)\.sh' |
 			awk -v t="$table" '{ for (i = 1; i < NF; i++) if ($i == "-T" && $(i + 1) == t) { print $(i + 2); break } }' |
 			while read -r key; do
 				[ -n "$key" ] && tmux unbind -T "$table" "$key" 2>/dev/null
@@ -128,8 +134,18 @@ function set_hub_bindings {
 	tmux bind "${where[@]}" "$key" run-shell -b "\"$CURRENT_DIR/scripts/hub_popup.sh\" '#{client_name}' '#{pane_id}'"
 }
 
+# C-k <tidy key> (chord table only). Old tidy bindings were removed by unbind_old_hub_bindings.
+function set_tidy_bindings {
+	local key=$(get_tmux_option_allow_empty "$tmux_claude_option_tidy_key" "$default_tidy_key")
+	if [ -z "$key" ] || [ "$key" = off ]; then
+		return
+	fi
+	tmux bind -T "$chord_table" "$key" run-shell -b "\"$CURRENT_DIR/scripts/hub_tidy.sh\" '#{client_name}' '#{pane_id}'"
+}
+
 function main {
 	set_goto_session_bindings
 	set_hub_bindings
+	set_tidy_bindings
 }
 main
