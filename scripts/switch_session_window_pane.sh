@@ -97,14 +97,16 @@ function claude_pane_ages {
 # pane in windows named $1. fzf only shows the second field. $2 picks the order:
 #   recent  - Claude panes first, most recently active on top (default)
 #   session - alphabetical by session name, then window/pane
-# $3 is "on" to also list Claude panes of resolved hub projects (dimmed and tagged "resolved");
-# by default ("off") they are left out.
+# $3 picks the view:
+#   off      - every pane except those of resolved hub projects (default)
+#   resolved - only the Claude panes of resolved hub projects (tagged "resolved"); other panes,
+#              hub or not, are left out. With none, the pinned header row says so instead.
 function list_panes {
   local filter_name=$1
   local sort_mode=${2:-recent}
-  local show_archived=${3:-off}
+  local view=${3:-off}
   tmux list-panes -a -F "#{session_name}|#{window_index}|#{pane_index}|#{window_name}|#{pane_title}|#{pane_id}" |
-    awk -F'|' -v filter="$filter_name" -v mode="$sort_mode" -v show_archived="$show_archived" \
+    awk -F'|' -v filter="$filter_name" -v mode="$sort_mode" -v view="$view" \
       -v ages="$(claude_pane_ages | tr '\n' ' ')" '
       function fmt_age(s) {
         if (s < 60) return s "s"
@@ -127,9 +129,9 @@ function list_panes {
       }
       # Every session is collected (not just filtered ones) so colours match across popups
       !($1 in seen) { seen[$1] = 1; names[++nnames] = $1 }
-      # Panes of resolved hub projects are dropped here, before they count towards the SESSION
-      # width; the colour list above still has their sessions, so other colours do not shift
-      $4 == filter && (show_archived == "on" || !($6 in archived)) {
+      # Each view drops the panes of the other view here, before they count towards the SESSION width;
+      # the colour list above still has every session, so colours do not shift between views
+      $4 == filter && ((view == "resolved") == ($6 in archived)) {
         count++
         sess[count] = $1; win[count] = $2; pane[count] = $3; title[count] = $5; id[count] = $6
         if (length($1) > width) width = length($1)
@@ -147,8 +149,12 @@ function list_panes {
         }
         for (i = 1; i <= nnames; i++) colour[names[i]] = "\033[38;5;" pal[(i - 1) % npal + 1] "m"
 
-        # Header row, printed before the sorted rows; fzf pins it via --header-lines=1
-        printf "\t%s\n", DIM sprintf("%-7s  %-8s  %-" width "s  %-4s  %s", "STATUS", "LAST MSG", "SESSION", "PANE", "TITLE") RESET
+        # Header row, printed before the sorted rows; fzf pins it via --header-lines=1. An empty
+        # resolved view gets a hint there instead, so the popup does not look broken.
+        if (view == "resolved" && count == 0)
+          printf "\t%s\n", DIM "no Claude panes of resolved hub projects are open  (ctrl-r: back)" RESET
+        else
+          printf "\t%s\n", DIM sprintf("%-7s  %-8s  %-" width "s  %-4s  %s", "STATUS", "LAST MSG", "SESSION", "PANE", "TITLE") RESET
 
         for (i = 1; i <= count; i++) {
           p = id[i]; t = title[i]
@@ -162,8 +168,8 @@ function list_panes {
             age_text = fmt_age(s) " ago"
             age_color = (s < 600) ? GREEN : (s < 3600) ? "" : DIM
             # cc-hub sessions get a dim tag at the start of the title, where it is not cut off.
-            # Resolved ones (only listed when asked for) are dimmed whole and say so in the tag.
-            if (p in archived) t = DIM hub[p] " resolved  " t RESET
+            # Resolved ones (only in the resolved view) say so in the tag.
+            if (p in archived) t = DIM hub[p] " resolved" RESET "  " t
             else if (p in hub) t = DIM hub[p] RESET "  " t
           } else {
             s = 9999999999
@@ -187,41 +193,55 @@ function list_panes {
     }
 }
 
-# fzf prompt for a sort mode and resolved state: "recent ❯ ", "session +resolved ❯ ", ...
+# fzf prompt for a view and sort mode: "recent ❯ ", "session ❯ ", "resolved · recent ❯ ", ...
 function prompt_for {
-  local sort_mode=$1 show_archived=$2
-  if [ "$show_archived" = on ]; then
-    printf '%s +resolved ❯ ' "$sort_mode"
+  local view=$1 sort_mode=$2
+  if [ "$view" = resolved ]; then
+    printf 'resolved · %s ❯ ' "$sort_mode"
   else
     printf '%s ❯ ' "$sort_mode"
   fi
 }
 
+# fzf header (the key hints) for a view; $2 is "nohub" to leave ctrl-r out. No square brackets:
+# transform passes it inside an fzf change-header[...] action.
+function header_for {
+  local view=$1 hub=${2:-hub}
+  local header='ctrl-s: switch sort (recent / session)'
+  if [ "$view" = resolved ]; then
+    header="$header  ctrl-r: back"
+  elif [ "$hub" = hub ]; then
+    header="$header  ctrl-r: show resolved"
+  fi
+  printf '%s' "$header"
+}
+
 # `--transform <sort|archived> <filter>`: run by fzf's ctrl-s / ctrl-r. Reads the current state from
 # $FZF_PROMPT, flips one half of it and prints the fzf action that shows the new state and reloads
-# the rows. The prompt is the only state, so each key keeps what the other one chose.
+# the rows. The prompt is the only state, so each key keeps what the other one chose: ctrl-r flips
+# between the normal view and the resolved-only view, ctrl-s between the two sort orders.
 function transform {
   local what=$1 filter_name=$2
   local self="$CURRENT_DIR/$(basename "${BASH_SOURCE[0]}")"
-  local sort_mode=recent show_archived=off
-  case "$FZF_PROMPT" in session*) sort_mode=session ;; esac
-  case "$FZF_PROMPT" in *+resolved*) show_archived=on ;; esac
+  local sort_mode=recent view=off
+  case "$FZF_PROMPT" in *session*) sort_mode=session ;; esac
+  case "$FZF_PROMPT" in resolved*) view=resolved ;; esac
   case "$what" in
     sort) if [ "$sort_mode" = recent ]; then sort_mode=session; else sort_mode=recent; fi ;;
-    archived) if [ "$show_archived" = on ]; then show_archived=off; else show_archived=on; fi ;;
+    archived) if [ "$view" = resolved ]; then view=off; else view=resolved; fi ;;
   esac
-  printf 'change-prompt(%s)+reload("%s" --list "%s" %s %s)\n' \
-    "$(prompt_for "$sort_mode" "$show_archived")" "$self" "$filter_name" "$sort_mode" "$show_archived"
+  printf 'change-prompt(%s)+change-header[%s]+reload("%s" --list "%s" %s %s)\n' \
+    "$(prompt_for "$view" "$sort_mode")" "$(header_for "$view")" "$self" "$filter_name" "$sort_mode" "$view"
 }
 
-# @fzf-claude-show-resolved: "on" lists resolved hub projects' panes when the popup opens.
+# @fzf-claude-show-resolved: "on" opens the popup in the resolved view (prints "resolved", else "off").
 # @fzf-claude-show-archived is its older name and is used only when the new one is not set, so an
 # explicit "off" on the new name wins over an old "on".
 function show_archived_default {
   local option=@fzf-claude-show-resolved
   [ -n "$(tmux show-option -gq "$option" 2>/dev/null)" ] || option=@fzf-claude-show-archived
   case "$(tmux show-option -gqv "$option" 2>/dev/null)" in
-    on | true | yes | 1) echo on ;;
+    on | true | yes | 1) echo resolved ;;
     *) echo off ;;
   esac
 }
@@ -241,30 +261,32 @@ function main {
   local retval
   local window_target
   local pane_target
-  local show_archived=off
-  local header='ctrl-s: switch sort (recent / session)'
+  local view=off hub=nohub
   local -a archived_bind=() exit_0=(--exit-0)
   local rows
 
-  # ctrl-s flips between the two sort modes and, with hub installed, ctrl-r shows or hides resolved
-  # hub projects; the prompt shows which mode is active
+  # ctrl-s flips between the two sort modes and, with hub installed, ctrl-r between the normal
+  # view and one that lists only the panes of resolved hub projects; the prompt shows both
   if [ -d "$HUB_PROJECTS" ]; then
-    show_archived=$(show_archived_default)
-    header="$header  ctrl-r: show/hide resolved"
+    hub=hub
+    view=$(show_archived_default)
     archived_bind=(--bind="ctrl-r:transform:\"$self\" --transform archived \"$filter_name\"")
   fi
-  rows=$(list_panes "$filter_name" recent "$show_archived")
-  # --exit-0 closes the popup at once when nothing is listed. If that is only because every row is
-  # resolved, keep it open, so ctrl-r (and the hint in the header) can still show them.
-  if [ "$show_archived" = off ] && [ "$(printf '%s\n' "$rows" | wc -l)" -le 1 ] &&
-    [ -n "${archived_bind[*]+set}" ] && [ "$(list_panes "$filter_name" recent on | wc -l)" -gt 1 ]; then
+  rows=$(list_panes "$filter_name" recent "$view")
+  # --exit-0 closes the popup at once when nothing is listed. Keep it open in the resolved view
+  # (its hint and ctrl-r lead back), and when the normal view is empty only because every row is
+  # resolved, so ctrl-r can still reach them.
+  if [ "$view" = resolved ]; then
+    exit_0=()
+  elif [ "$(printf '%s\n' "$rows" | wc -l)" -le 1 ] && [ "$hub" = hub ] &&
+    [ "$(list_panes "$filter_name" recent resolved | wc -l)" -gt 1 ]; then
     exit_0=()
   fi
   sessions=$(printf '%s\n' "$rows" |
     fzf ${exit_0[@]+"${exit_0[@]}"} --print-query --reverse --ansi \
       --delimiter=$'\t' --with-nth=2.. --tiebreak=index \
-      --prompt="$(prompt_for recent "$show_archived")" --pointer='▌' --info=inline-right --no-scrollbar --highlight-line \
-      --header-lines=1 --header="$header" \
+      --prompt="$(prompt_for "$view" recent)" --pointer='▌' --info=inline-right --no-scrollbar --highlight-line \
+      --header-lines=1 --header="$(header_for "$view" "$hub")" \
       --with-shell='bash -c' \
       --bind="ctrl-s:transform:\"$self\" --transform sort \"$filter_name\"" \
       ${archived_bind[@]+"${archived_bind[@]}"} \
@@ -294,8 +316,8 @@ function main {
   fi
 }
 
-# `--list <filter> <sort> [on|off]` only prints the rows (on: resolved hub projects too); fzf's
-# reloads use it. `--transform` is the ctrl-s / ctrl-r handler.
+# `--list <filter> <sort> [off|resolved]` only prints the rows (resolved: only resolved hub
+# projects' panes); fzf's reloads use it. `--transform` is the ctrl-s / ctrl-r handler.
 if [ "$1" == "--list" ]; then
   list_panes "$2" "$3" "$4"
 elif [ "$1" == "--transform" ]; then
