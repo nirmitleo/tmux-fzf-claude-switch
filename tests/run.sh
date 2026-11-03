@@ -468,80 +468,60 @@ if git -C "$ROOT" show 81270c0:scripts/switch_session_window_pane.sh >"$TMP/base
   echo "  info  --list with 5 Claude sessions, mean of 10: pre-hub $(((t1 - t0) / 10))ms, this branch $(((t2 - t1) / 10))ms"
 fi
 
-echo "== resolved hub projects (\$CLAUDE_HUB/projects/<p>/.archived)"
-# Project "old" is archived. Its coordinator and a thread run in a tmux session whose name sorts
-# before "t" and is longer than the SESSION column's minimum, so a hidden row that still counted
-# would widen that column, and dropping the session from the colour list would recolour "t".
+echo "== resolved hub projects are not special in the switcher (\$CLAUDE_HUB/projects/<p>/.archived)"
+# Project "old" is resolved (hub's marker file exists), and so is "ent", whose row is tagged from
+# the session's cwd. The switcher does not read the marker: hub resolve closes a resolved project's
+# panes, and any that are still open are listed like the rest, with the plain hub:<p> tag.
 mkdir -p "$HUBROOT/projects/old"
 echo 2026-10-28 >"$HUBROOT/projects/old/.archived"
-T new-session -d -s a-archived-proj -n claude -x 200 -y 50
-T split-window -t a-archived-proj:claude
-make_session 0 '"cwd":"/w","name":"old-coord","nameSource":"peer"' "old coord title" a-archived-proj
-make_session 1 '"cwd":"/w","name":"old--x","nameSince":1' "old thread title" a-archived-proj
-SWITCH="$ROOT/scripts/switch_session_window_pane.sh"
-list_mode() { # list_mode <off|resolved|""> [sort] -> the --list rows, ANSI kept
-  env TMUX="$TMUX_VAL" CLAUDE_CONFIG_DIR="$CFG" CLAUDE_HUB="$HUBROOT" "$SH" "$SWITCH" --list claude "${2:-recent}" $1
-}
-raw_off=$(list_mode off); raw_res=$(list_mode resolved)
-rows=$(printf '%s\n' "$raw_off" | strip_ansi)
-check "archived project: coordinator row hidden by default" lacks "$rows" "old coord title"
-check "  ... thread row hidden too" lacks "$rows" "old thread title"
-check "  ... also when --list is given no view argument" test "$(list_mode "")" = "$raw_off"
-check "  ... and for an unknown view (an old 'on' from before the resolved-only view)" test "$(list_mode on)" = "$raw_off"
-check "non-archived hub project unaffected (hub:cc-hub coordinator)" contains "$(row 'coord title')" "hub:cc-hub  coord title"
-check "  ... and its thread" contains "$rows" "hub:cc-hub/tmux-hub-mode  thread title"
-check "  ... and hub:ent" contains "$rows" "hub:ent  cwd title"
-check "  ... non-hub rows still listed" contains "$rows" "former title"
-check "hidden rows do not widen the SESSION column" contains "$(printf '%s\n' "$rows" | head -n 1)" "SESSION  PANE"
-check "  ... nor change session colours ('t' keeps the second palette colour)" \
-  contains "$(printf '%s\n' "$raw_off" | grep -F 'coord title')" $'\033[38;5;170mt '
-rows_res=$(printf '%s\n' "$raw_res" | strip_ansi)
-check "resolved view: the column header row" contains "$(printf '%s\n' "$rows_res" | head -n 1)" "STATUS   LAST MSG  SESSION"
-check "  ... resolved coordinator listed, tagged 'hub:old resolved'" contains "$rows_res" "hub:old resolved  old coord title"
-check "  ... and the thread, 'hub:old/x resolved'" contains "$rows_res" "hub:old/x resolved  old thread title"
-check "  ... the tag is dim, the title is not" contains "$raw_res" $'\033[2mhub:old resolved\033[0m  old coord title'
-check "  ... exactly header + 2 rows" test "$(printf '%s\n' "$raw_res" | wc -l)" -eq 3
-for t in "hub:cc-hub  coord title" "hub:cc-hub/tmux-hub-mode" "cwd title" "former title" "nodir title" "not claude"; do
-  check "  ... no active or non-hub row: '$t'" lacks "$rows_res" "$t"
-done
-check "  ... SESSION column sized to its own rows (a-archived-proj, 15 wide)" \
-  contains "$(printf '%s\n' "$rows_res" | head -n 1)" "SESSION          PANE"
-check "  ... session colours unchanged ('a-archived-proj' keeps the first palette colour)" \
-  contains "$raw_res" $'\033[38;5;39ma-archived-proj'
-check "  ... session order works too" contains "$(list_mode resolved session | strip_ansi)" "hub:old resolved  old coord title"
 touch "$HUBROOT/projects/ent/.archived"
-check "archived project found from the session's cwd (hub:ent) is hidden" lacks "$(list_mode off | strip_ansi)" "cwd title"
-check "  ... and listed in the resolved view" contains "$(list_mode resolved | strip_ansi)" "hub:ent resolved  cwd title"
-rm "$HUBROOT/projects/ent/.archived"
-check "  ... and back, untagged as archived, once .archived is removed" contains "$(list_mode off | strip_ansi)" "hub:ent  cwd title"
-rm "$HUBROOT/projects/old/.archived"
-check "unarchive (rm .archived): old rows back with a plain tag" contains "$(list_mode off | strip_ansi)" "hub:old  old coord title"
-empty_res=$(list_mode resolved | strip_ansi)
-check "nothing resolved: the resolved view is just a hint row" \
-  test "$empty_res" = "$(printf '\tno Claude panes of resolved hub projects are open  (ctrl-r: back)')"
-: >"$HUBROOT/projects/old/.archived"
-check "only existence matters: an empty .archived hides too" lacks "$(list_mode off | strip_ansi)" "old coord title"
-rm "$HUBROOT/projects/old/.archived"; mkdir "$HUBROOT/projects/old/.archived"
-check "  ... and so does a directory named .archived" lacks "$(list_mode off | strip_ansi)" "old coord title"
-rmdir "$HUBROOT/projects/old/.archived"; echo 2026-10-28 >"$HUBROOT/projects/old/.archived"
+T new-session -d -s a-old-proj -n claude -x 200 -y 50
+T split-window -t a-old-proj:claude
+make_session 0 '"cwd":"/w","name":"old-coord","nameSource":"peer"' "old coord title" a-old-proj
+make_session 1 '"cwd":"/w","name":"old--x","nameSince":1' "old thread title" a-old-proj
+SWITCH="$ROOT/scripts/switch_session_window_pane.sh"
+list_sort() { # list_sort <sort> [extra --list argument] -> the --list rows, ANSI kept
+  env TMUX="$TMUX_VAL" CLAUDE_CONFIG_DIR="$CFG" CLAUDE_HUB="$HUBROOT" "$SH" "$SWITCH" --list claude "$@"
+}
+raw=$(list_sort recent)
+rows=$(printf '%s\n' "$raw" | strip_ansi)
+check "pane of a resolved project shows normally: coordinator tagged hub:old" contains "$rows" "hub:old  old coord title"
+check "  ... and its thread, hub:old/x" contains "$rows" "hub:old/x  old thread title"
+check "  ... resolved project found from the cwd (hub:ent) shows normally" contains "$rows" "hub:ent  cwd title"
+check "  ... the plain dim tag" contains "$raw" $'\033[2mhub:old\033[0m  old coord title'
+check "  ... no 'resolved' text in any row" lacks "$rows" "resolved"
+check "  ... the column header row as usual" contains "$(printf '%s\n' "$rows" | head -n 1)" "STATUS   LAST MSG  SESSION"
+check "  ... active project rows still listed" contains "$rows" "hub:cc-hub  coord title"
+check "  ... non-hub rows still listed" contains "$rows" "former title"
+check "  ... session order lists them too" contains "$(list_sort session | strip_ansi)" "hub:old  old coord title"
+check "  ... a leftover 3rd --list argument (the removed 'resolved' view) is ignored" \
+  test "$(list_sort recent resolved)" = "$raw"
+for d in old ent; do mv "$HUBROOT/projects/$d/.archived" "$TMP/$d.archived"; done
+check "removing .archived changes nothing" test "$(list_sort recent)" = "$raw"
+for d in old ent; do mv "$TMP/$d.archived" "$HUBROOT/projects/$d/.archived"; done
+# Against the switcher with hub tags but before any resolved-project feature (6074d77, PR #3)
+if git -C "$ROOT" show 6074d77:scripts/switch_session_window_pane.sh >"$TMP/base/switch-pre-resolved.sh" 2>/dev/null; then
+  pre() { env TMUX="$TMUX_VAL" CLAUDE_CONFIG_DIR="$CFG" CLAUDE_HUB="$HUBROOT" "$SH" "$TMP/base/switch-pre-resolved.sh" --list claude "$1"; }
+  check "--list identical to 6074d77 (before resolved projects), .archived present, recent" test "$(pre recent)" = "$raw"
+  check "  ... and in session order" test "$(pre session)" = "$(list_sort session)"
+else
+  bad "could not read 6074d77:scripts/switch_session_window_pane.sh"
+fi
 
-# ctrl-s / ctrl-r handler: the prompt holds both states, each key flips one and keeps the other
+# ctrl-s handler: the prompt holds the sort order
 tr_out() { env FZF_PROMPT="$1" "$SH" "$SWITCH" --transform "$2" claude; }
 reload() { printf 'reload("%s" --list "claude" %s)' "$SWITCH" "$1"; }
-H_ON='change-header[ctrl-s: switch sort (recent / session)  ctrl-r: show resolved]'
-H_RES='change-header[ctrl-s: switch sort (recent / session)  ctrl-r: back]'
-check "ctrl-r from 'recent ❯ ': resolved-only view" \
-  test "$(tr_out 'recent ❯ ' archived)" = "change-prompt(resolved · recent ❯ )+$H_RES+$(reload 'recent resolved')"
-check "ctrl-s from 'resolved · recent ❯ ': session order, resolved view kept" \
-  test "$(tr_out 'resolved · recent ❯ ' sort)" = "change-prompt(resolved · session ❯ )+$H_RES+$(reload 'session resolved')"
-check "ctrl-r from 'resolved · session ❯ ': back to the normal view, session order kept" \
-  test "$(tr_out 'resolved · session ❯ ' archived)" = "change-prompt(session ❯ )+$H_ON+$(reload 'session off')"
-check "the old '+resolved' prompt is not read as the resolved view" \
-  test "$(tr_out 'recent +resolved ❯ ' sort)" = "change-prompt(session ❯ )+$H_ON+$(reload 'session off')"
-check "ctrl-s from 'session ❯ ': back to recent, as before" \
-  test "$(tr_out 'session ❯ ' sort)" = "change-prompt(recent ❯ )+$H_ON+$(reload 'recent off')"
+check "ctrl-s from 'recent ❯ ': session order" \
+  test "$(tr_out 'recent ❯ ' sort)" = "change-prompt(session ❯ )+$(reload session)"
+check "ctrl-s from 'session ❯ ': back to recent" \
+  test "$(tr_out 'session ❯ ' sort)" = "change-prompt(recent ❯ )+$(reload recent)"
+check "  ... no header change and no 'resolved' in the action" lacks "$(tr_out 'recent ❯ ' sort)" "header"
+check "an old 'resolved · recent ❯ ' prompt (popup open across an upgrade): ctrl-s just flips the sort" \
+  test "$(tr_out 'resolved · recent ❯ ' sort)" = "change-prompt(session ❯ )+$(reload session)"
+check "the removed ctrl-r handler (--transform archived) prints nothing (no fzf action)" \
+  test -z "$(tr_out 'recent ❯ ' archived)"
 
-echo "== resolved, through C-k c in a real client"
+echo "== no resolved features through C-k c in a real client"
 # The popup gets the tmux global environment, so the fake registry, hub root and stub fzf go there
 T set-environment -g PATH "$TMP/stub-new:$BASEPATH:$TMUXDIR"
 T set-environment -g CLAUDE_CONFIG_DIR "$CFG"
@@ -552,85 +532,48 @@ TO new-session -d -s o -x 120 -y 40 "env -u TMUX tmux -L $SOCK attach -t t"
 wait_for attached || bad "inner client did not attach"
 press_c() { : >"$LOG"; TO send-keys -t o C-k c; wait_for popup_open "STUB-FZF-SWITCHER"; wait_for popup_closed "STUB-FZF-SWITCHER"; }
 press_c
-n_off=$(log_value fzf-rows)
-check "C-k c: header has the ctrl-r hint" contains "$(log_value fzf-args)" "ctrl-r: show resolved"
-check "  ... prompt 'recent ❯ ' (normal view)" contains "$(log_value fzf-args)" "--prompt=recent ❯  "
-check "  ... ctrl-r is bound to the transform" contains "$(log_value fzf-args)" "ctrl-r:transform:"
+n_rows=$(log_value fzf-rows); args=$(log_value fzf-args)
+check "C-k c: no ctrl-r binding" lacks "$args" "ctrl-r"
+check "  ... header is just the ctrl-s hint" contains "$args" "--header=ctrl-s: switch sort (recent / session) "
+# The plugin path is taken out first: a checkout's folder name may contain the word
+check "  ... no 'resolved' text in the header or prompt" lacks "$(printf '%s' "$args" | sed "s#$ROOT##g")" "resolved"
+check "  ... prompt 'recent ❯ '" contains "$args" "--prompt=recent ❯  "
+check "  ... fzf runs with --exit-0" contains "$args" "--exit-0"
+check "  ... the resolved project's panes are passed to fzf" grep -q 'hub:old.*old coord title' "$TMP/fzf-in"
 T set -g @fzf-claude-show-resolved on
-press_c
-check "@fzf-claude-show-resolved on: opens in the resolved view (header + 2 rows)" test "$(log_value fzf-rows)" -eq 3
-check "  ... prompt starts as 'resolved · recent ❯ '" contains "$(log_value fzf-args)" "--prompt=resolved · recent ❯ "
-check "  ... header says 'ctrl-r: back'" contains "$(log_value fzf-args)" "ctrl-r: back"
-check "  ... no --exit-0 in the resolved view" lacks "$(log_value fzf-args)" "--exit-0"
-mv "$HUBROOT/projects/old/.archived" "$TMP/old.archived"
-press_c
-check "  ... nothing resolved: still opens, only the hint row" test "$(log_value fzf-rows)" -eq 1
-check "  ... the hint says so" contains "$(log_value fzf-first)" "no Claude panes of resolved hub projects are open"
-mv "$TMP/old.archived" "$HUBROOT/projects/old/.archived"
-T set -gu @fzf-claude-show-resolved
 T set -g @fzf-claude-show-archived on
 press_c
-check "@fzf-claude-show-archived on (older name) still works: resolved view" test "$(log_value fzf-rows)" -eq 3
-T set -g @fzf-claude-show-resolved off
-press_c
-check "  ... but an explicit @fzf-claude-show-resolved off wins over it" test "$(log_value fzf-rows)" -eq "$n_off"
+check "@fzf-claude-show-resolved / -archived on: ignored, same rows" test "$(log_value fzf-rows)" -eq "$n_rows"
+check "  ... and the same fzf arguments" test "$(log_value fzf-args)" = "$args"
+check "  ... no error from tmux" lacks "$(T show-messages 2>/dev/null)" "returned"
 T set -gu @fzf-claude-show-resolved
 T set -gu @fzf-claude-show-archived
-check "  ... fzf runs with --exit-0 when rows are listed" contains "$(log_value fzf-args)" "--exit-0"
-# Every Claude pane archived (only the "claude" window counts): the popup must stay open for ctrl-r
-for d in cc-hub ent; do touch "$HUBROOT/projects/$d/.archived"; done
-# Close the panes without a hub tag (by title: indexes shift as panes close), so every row is archived
-for title in "former title" "nodir title" "not claude"; do
-  T kill-pane -t "$(T list-panes -t t:claude -F '#{pane_id} #{pane_title}' | sed -n "s/^\(%[0-9]*\) $title\$/\1/p")"
-done
-press_c
-check "every row archived: fzf gets only the header" test "$(log_value fzf-rows)" -eq 1
-check "  ... and no --exit-0, so the popup stays open for ctrl-r" lacks "$(log_value fzf-args)" "--exit-0"
-for d in cc-hub ent; do rm "$HUBROOT/projects/$d/.archived"; done
 T set-environment -g CLAUDE_HUB "$TMP/no-such-hub"
 press_c
-check "no hub installed: no ctrl-r key or hint" lacks "$(log_value fzf-args)" "ctrl-r"
-check "  ... header as before hub: just the ctrl-s hint" contains "$(log_value fzf-args)" "--header=ctrl-s: switch sort (recent / session) "
+check "no hub installed: the same fzf arguments" test "$(log_value fzf-args)" = "$args"
 T set-environment -g CLAUDE_HUB "$HUBROOT"
 
-# The same with the real fzf, when it is installed: ctrl-r really swaps the list for resolved rows
+# The same with the real fzf, when it is installed: ctrl-r is unbound, so it changes nothing
 REALFZF=$(PATH="${PATH#"$TMP/stub-new:"}" command -v fzf 2>/dev/null)
 if [ -n "$REALFZF" ]; then
   T set-environment -g PATH "$(dirname "$REALFZF"):$BASEPATH:$TMUXDIR"
   TO send-keys -t o C-k c
-  check "real fzf: C-k c lists the cc-hub coordinator" wait_for popup_open "hub:cc-hub  coord title"
+  check "real fzf: C-k c lists the resolved project's coordinator, plain tag" wait_for popup_open "hub:old  old coord title"
+  check "  ... and the active cc-hub coordinator" contains "$(screen)" "hub:cc-hub  coord title"
   check "  ... and hub:ent" contains "$(screen)" "hub:ent  cwd title"
-  check "  ... not the archived one" lacks "$(screen)" "old coord title"
-  check "  ... header hint 'ctrl-r: show resolved'" contains "$(screen)" "ctrl-r: show resolved"
+  # Only fzf's own lines (prompt, header, rows): the pane behind the popup may show a path
+  fzf_lines() { screen | grep -E '❯|ctrl-|STATUS|hub:|title'; }
+  check "  ... no 'resolved' text in the popup" lacks "$(fzf_lines)" "resolved"
+  check "  ... no ctrl-r hint" lacks "$(screen)" "ctrl-r"
+  before=$(screen)
   TO send-keys -t o C-r
-  check "  ... ctrl-r shows the resolved one, tagged resolved" wait_for popup_open "hub:old resolved  old coord title"
-  active_gone() { popup_closed "hub:cc-hub  coord title" && popup_closed "hub:ent  cwd title"; }
-  check "  ... and only resolved rows (active cc-hub and ent rows gone)" wait_for active_gone
-  check "  ... the prompt says 'resolved · recent'" contains "$(screen)" "resolved · recent ❯"
-  check "  ... the header says 'ctrl-r: back' (the ctrl-s hint and its parentheses intact)" contains "$(screen)" "switch sort (recent / session)  ctrl-r: back"
+  sleep 1
+  check "  ... ctrl-r does nothing: the popup is unchanged" test "$(screen)" = "$before"
   TO send-keys -t o C-s
-  check "  ... ctrl-s keeps the resolved view (session order)" wait_for popup_open "resolved · session ❯"
-  check "  ... rows still there" contains "$(screen)" "old coord title"
-  check "  ... active rows still gone" active_gone
-  TO send-keys -t o C-r
-  old_gone() { popup_open "session ❯" && popup_closed "resolved ·" && popup_closed "old coord title" && popup_open "hub:cc-hub  coord title"; }
-  check "  ... ctrl-r again: back to the normal view, still session order" wait_for old_gone
-  check "  ... header hint back to 'ctrl-r: show resolved'" contains "$(screen)" "ctrl-r: show resolved"
+  check "  ... ctrl-s still switches to session order" wait_for popup_open "session ❯"
+  check "  ... rows still there" contains "$(screen)" "hub:old  old coord title"
   TO send-keys -t o C-g
   check "  ... C-g closes the popup" wait_for popup_closed "session ❯"
-  # Nothing resolved: ctrl-r gives the hint row, and the popup stays open (no --exit-0 on reload)
-  mv "$HUBROOT/projects/old/.archived" "$TMP/old.archived"
-  TO send-keys -t o C-k c
-  check "real fzf, nothing resolved: C-k c opens" wait_for popup_open "hub:cc-hub  coord title"
-  TO send-keys -t o C-r
-  check "  ... ctrl-r shows the 'no Claude panes of resolved' hint" wait_for popup_open "no Claude panes of resolved hub projects are open"
-  sleep 0.5
-  check "  ... and the popup stays open" popup_open "resolved · recent ❯"
-  TO send-keys -t o C-r
-  check "  ... ctrl-r goes back to the normal list" wait_for popup_open "hub:cc-hub  coord title"
-  TO send-keys -t o C-g
-  check "  ... C-g closes the popup" wait_for popup_closed "recent ❯"
-  mv "$TMP/old.archived" "$HUBROOT/projects/old/.archived"
 else
   echo "  skip  real fzf checks (fzf not installed)"
 fi
@@ -639,7 +582,7 @@ TO kill-server 2>/dev/null
 echo "== tidy (C-k l, hub_tidy.sh)"
 # The registry and hub root from the sections above: pane "coord title" runs the Claude session
 # cc-hub-coord, projects cc-hub, ent and old exist. Extra panes and windows carry the other cases.
-T kill-session -t a-archived-proj 2>/dev/null
+T kill-session -t a-old-proj 2>/dev/null
 P_COORD=$(T list-panes -t t:claude -F '#{pane_id} #{pane_title}' | sed -n 's/ coord title$//p')
 T new-window -d -t t -n work
 P_THREAD=$(T display -p -t t:work '#{pane_id}')
