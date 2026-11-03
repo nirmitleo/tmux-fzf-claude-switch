@@ -23,7 +23,7 @@ This is a customized tmux session/window/pane switcher optimized for Claude Code
 7. **Hub mode**: `Ctrl+K` → `h` opens the [cc-hub](#hub-mode) picker (projects, coordinators, threads) in a popup
    - Claude panes that belong to a hub project get a dim `hub:<project>` or `hub:<project>/<thread>` tag
      in the `Ctrl+K` → `c` switcher
-   - Panes of [resolved](#resolved-projects) hub projects are hidden; `ctrl-r` shows them
+   - Panes of [resolved](#resolved-projects) hub projects are hidden; `ctrl-r` switches to a list of only those
    - `Ctrl+K` → `l` runs `hub tidy` for the current pane's project: coordinator left, threads stacked right
 
 ### Why this fork?
@@ -52,8 +52,8 @@ idle     1h ago    iv-pro-baby             4.1   Push remaining changes
 
 Press `ctrl-s` to switch the order between `recent` (Claude panes by last activity) and `session`
 (alphabetical); the prompt shows the active order. While you type, fzf ranks rows by match quality instead.
-With hub installed, `ctrl-r` shows or hides the panes of [resolved hub projects](#resolved-projects)
-(the prompt then reads `recent +resolved ❯`).
+With hub installed, `ctrl-r` switches to a list of only the panes of
+[resolved hub projects](#resolved-projects) (the prompt then reads `resolved · recent ❯`), and back.
 
 The status and age come from Claude Code's session registry (`~/.claude/sessions/<pid>.json`, whose `tmux` field
 records the pane ID) and the tail of that session's transcript (`~/.claude/projects/*/<sessionId>.jsonl`).
@@ -94,26 +94,38 @@ the file's existence matters (hub writes the date into it).
 
 Resolving a project hides it, and hub also stops its thread workers: every open thread is
 resolved, the thread sessions are stopped (their transcripts stay) and their attach panes close,
-and the project's watches are paused. The coordinator keeps running. The plugin itself only hides:
-in the `Ctrl+K` switchers (`c`, and `s`/`i`/`t` when a Claude pane sits in such a window), the panes
-of a resolved project's coordinator, threads and other sessions are left out. The plugin stops,
-kills, renames or moves nothing, and other rows keep their order and colours. To reach them:
+and the project's watches are paused. The coordinator keeps running (until you stop it), so its
+pane can still be open. The plugin itself stops, kills, renames or moves nothing: it only chooses
+which rows the `Ctrl+K` switchers show (`c`, and `s`/`i`/`t` when a Claude pane sits in such a
+window).
 
-- Press `ctrl-r` in the switcher to show resolved rows, and again to hide them. Shown, a row is dim
-  and tagged `hub:<project> resolved` (type `resolved` to find them). `ctrl-s` keeps the choice.
-- Or set `@fzf-claude-show-resolved` to `on` to show them every time the switcher opens (`ctrl-r`
-  still hides them). It is read each time the popup opens, so no reload is needed. The older name
-  `@fzf-claude-show-archived` still works; it is only read when `@fzf-claude-show-resolved` is not set.
+The switcher has two views, and `ctrl-r` flips between them:
 
-If every row is resolved, the popup still opens (empty, with the `ctrl-r` hint) instead of closing
-straight away.
+- **Normal** (prompt `recent ❯`, header `ctrl-r: show resolved`): every pane except those of
+  resolved projects. Their coordinator, threads and other sessions are left out; other rows keep
+  their order and colours.
+- **Resolved** (prompt `resolved · recent ❯`, header `ctrl-r: back`): only the Claude panes of
+  resolved projects, each tagged `hub:<project> resolved`. Active projects and panes that are not
+  part of hub are not shown. If no such pane is open, the list is empty and says so
+  (`no Claude panes of resolved hub projects are open`); the popup stays open, and `ctrl-r` goes back.
+
+`ctrl-s` changes the sort order in either view and keeps the view; `ctrl-r` keeps the sort order.
+
+`@fzf-claude-show-resolved` set to `on` opens the switcher in the resolved view (`ctrl-r` still goes
+back). It is read each time the popup opens, so no reload is needed. Before the resolved view
+existed, `on` listed resolved panes together with the active ones; that combined list is gone. The
+older name `@fzf-claude-show-archived` still works; it is only read when
+`@fzf-claude-show-resolved` is not set.
+
+If every row of the normal view is resolved, the popup still opens (empty, with the `ctrl-r` hint)
+instead of closing straight away.
 
 Hub mode (`Ctrl+K` → `h`) is not filtered by the plugin: `hub --tmux` decides what its picker shows.
 
 Options (defaults shown):
 
 ```bash
-set -g @fzf-claude-show-resolved 'off'         # 'on' lists resolved hub projects' panes in the switcher
+set -g @fzf-claude-show-resolved 'off'         # 'on' opens the switcher in the resolved-only view
                                                # (older name: @fzf-claude-show-archived)
 set -g @fzf-claude-hub-key 'h'                 # '' or 'off' disables hub mode
 set -g @fzf-claude-tidy-key 'l'                # Ctrl+K then this key runs hub tidy; '' or 'off' unbinds it
@@ -190,7 +202,7 @@ leaves the pane in view-mode, so the next key you press works as usual.
 `tests/run.sh` drives the plugin in throwaway tmux servers (sockets `hubmodetest` and
 `hubmodetest-outer`, `-f /dev/null`), so your own tmux server and config are not touched. It checks
 the key bindings, `hub_mode.sh` with stub `hub` executables, real `Ctrl+K` `h`/`c`/`s` presses through
-an attached client, the hub tag and resolved projects (hidden, `--list ... on`, `ctrl-r`/`ctrl-s`,
+an attached client, the hub tag and resolved projects (hidden, the resolved-only view `--list ... resolved` and its empty hint, `ctrl-r`/`ctrl-s`,
 `@fzf-claude-show-resolved` and its older name; with the real fzf too when it is installed), the
 `Ctrl+K` `l` tidy key with stub hubs against a fake `CLAUDE_CONFIG_DIR`. Run it with both bashes, since tmux
 `run-shell` may use macOS's bash 3.2:
