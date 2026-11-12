@@ -152,12 +152,19 @@ The window list in the status bar (`8:cc-hub-coord` ...) shows which windows nee
 
 | Colour | Meaning | Clears when |
 |--------|---------|-------------|
-| red (bold white text) | a Claude session in the window waits on you: a permission prompt, a question (AskUserQuestion) or another dialog; or a background hub thread is blocked | the session works again (you answered) |
-| blue (bold white text) | a Claude session in the window finished its turn while you were not looking at the window | you open the window (also when that session starts working again or exits) |
+| red `#d70000` (bold white text) | a Claude session in the window waits on you: a permission prompt, a question (AskUserQuestion) or another dialog; or a background hub thread is blocked | the session works again (you answered) |
+| blue `#005fd7` (bold white text) | a Claude session in the window finished its turn while you were not looking at the window | you open the window (also when that session starts working again or exits) |
 
 When one window has both, red wins. A session that finishes in the window you are looking at does
 not turn it blue. Both colours stand out on the default green status bar. Only the window-list
 entry changes: no pane borders, pane titles or window names.
+
+The defaults are hex colours, not the named `red` and `blue`. A terminal theme can redraw a named
+colour as any colour: Monokai Classic, for example, draws `blue` as orange and `red` as pink. A hex
+colour is drawn as it is when tmux knows that the terminal has true colour (the `RGB` terminal
+feature). Without it, tmux uses the nearest of the 256 colours: `#d70000` is colour 160 and
+`#005fd7` is colour 26, the same colours. The white text is `#ffffff` for the same reason. White on
+each colour has a contrast of more than 4.5:1 (WCAG AA): 5.4:1 on the red, 5.8:1 on the blue.
 It works for every Claude Code session in tmux, hub or not, and needs no Claude Code hooks or
 settings.
 
@@ -196,15 +203,15 @@ Options (set them before the plugin loads, or reload with `prefix + I`):
 ```bash
 set -g @fzf-claude-attn 'off'                          # turn it all off: formats, hooks, loop
 set -g @fzf-claude-attn-format 'off'                   # keep @claude_attn, leave your formats alone
-set -g @fzf-claude-attn-input-style 'bg=red,fg=white,bold'   # default
-set -g @fzf-claude-attn-done-style 'bg=blue,fg=white,bold'    # default
+set -g @fzf-claude-attn-input-style 'bg=#d70000,fg=#ffffff,bold'   # default (red)
+set -g @fzf-claude-attn-done-style 'bg=#005fd7,fg=#ffffff,bold'   # default (blue)
 set -g @fzf-claude-attn-interval '2'                   # seconds between checks
 ```
 
 Your own format can use the option directly, for example:
 
 ```bash
-set -g window-status-format '#{?#{==:#{@claude_attn},input},#[fg=red],}#I:#W'
+set -g window-status-format '#{?#{==:#{@claude_attn},input},#[fg=#d70000],}#I:#W'
 ```
 
 ## Requirements
@@ -244,9 +251,9 @@ an attached client, the hub tag, that resolved hub projects get no special treat
 (their panes listed normally, `ctrl-r` unbound, no `resolved` text, the removed options ignored;
 with the real fzf too when it is installed), `ctrl-s`, the
 `Ctrl+K` `l` tidy key with stub hubs against a fake `CLAUDE_CONFIG_DIR`, and the window colours
-(stand-in Claude processes in panes with a fake registry: red and blue (bold) on the rendered status
-line, clearing on work and on a real `prefix` + window key, hub thread attach panes, other-server pane
-ids, your formats kept, reloads, opt-out, no loop left behind). Every test server reads an empty
+(stand-in Claude processes in panes with a fake registry: the exact hex red and blue (bold) on the
+rendered status line, colours 160 and 26 without true colour, clearing on work and on a real
+`prefix` + window key, hub thread attach panes, other-server pane ids, your formats kept, reloads, opt-out, no loop left behind). Every test server reads an empty
 `CLAUDE_CONFIG_DIR`, never your real `~/.claude`. Run it with both bashes, since tmux
 `run-shell` may use macOS's bash 3.2:
 

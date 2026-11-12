@@ -41,15 +41,18 @@ tmux_claude_option_tidy_key="@fzf-claude-tidy-key"
 #   @fzf-claude-attn              on | off   off stops it all and takes the style back out
 #   @fzf-claude-attn-format       on | off   off keeps @claude_attn up to date but leaves the
 #                                            formats alone (use #{@claude_attn} in your own)
-#   @fzf-claude-attn-input-style  default "bg=red,fg=white,bold"
-#   @fzf-claude-attn-done-style   default "bg=blue,fg=white,bold"
+#   @fzf-claude-attn-input-style  default "bg=#d70000,fg=#ffffff,bold"
+#   @fzf-claude-attn-done-style   default "bg=#005fd7,fg=#ffffff,bold"
+#                                 hex, not named red/blue: a terminal theme can redraw named colours
+#                                 (Monokai Classic: blue = orange). Without RGB, tmux uses the
+#                                 nearest 256 colour: 160 and 26, the same colours.
 #   @fzf-claude-attn-interval     seconds between checks, default 2
 tmux_claude_option_attn="@fzf-claude-attn"
 tmux_claude_option_attn_format="@fzf-claude-attn-format"
 tmux_claude_option_attn_input_style="@fzf-claude-attn-input-style"
 tmux_claude_option_attn_done_style="@fzf-claude-attn-done-style"
-default_attn_input_style="bg=red,fg=white,bold"
-default_attn_done_style="bg=blue,fg=white,bold"
+default_attn_input_style="bg=#d70000,fg=#ffffff,bold"
+default_attn_done_style="bg=#005fd7,fg=#ffffff,bold"
 # The prefix this plugin put in front of the formats last time, so a reload can take it out again
 attn_applied_option="@fzf-claude-attn-applied"
 # Fixed slots in these hook arrays: a reload replaces our entries and leaves your own hooks alone

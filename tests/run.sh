@@ -762,14 +762,17 @@ sgr_at() {
 				elsif (($c >= 40 && $c <= 47) || $c == 49 || ($c >= 100 && $c <= 107)) { $bg = $c } } }
 		print "fg=$fg bg=$bg bold=$b"; exit;'
 }
-red() { test "$(sgr_at "$1")" = "fg=37 bg=41 bold=1"; }  # default input style: bg=red,fg=white,bold
-blue() { test "$(sgr_at "$1")" = "fg=37 bg=44 bold=1"; } # default done style: bg=blue,fg=white,bold
-plain() { local s; s=$(sgr_at "$1"); test -n "$s" && lacks "$s" "fg=37 " && lacks "$s" "bg=41 " && lacks "$s" "bg=44 "; }
+# The default styles are hex. A client with true colour (the RGB feature; the test client has it)
+# gets them exactly: white 38;2;255;255;255 on red 48;2;215;0;0 or on blue 48;2;0;95;215.
+WHITE_FG='38;2;255;255;255'; RED_BG='48;2;215;0;0'; BLUE_BG='48;2;0;95;215'
+red() { test "$(sgr_at "$1")" = "fg=$WHITE_FG bg=$RED_BG bold=1"; }   # input: bg=#d70000,fg=#ffffff,bold
+blue() { test "$(sgr_at "$1")" = "fg=$WHITE_FG bg=$BLUE_BG bold=1"; } # done: bg=#005fd7,fg=#ffffff,bold
+plain() { local s; s=$(sgr_at "$1"); test -n "$s" && lacks "$s" "fg=$WHITE_FG " && lacks "$s" "bg=$RED_BG " && lacks "$s" "bg=$BLUE_BG "; }
 closed() { plain "$1" && contains "$(sgr_at "$1")" "bold=0"; } # plain and not bold: nothing leaked in
 key() { TO send-keys -t o C-b "$1"; sleep 0.3; } # a real prefix + <n> through the client
 SOLO='1|solo|mine'; PAIR='2|pair|mine'; THREAD='3|thread|mine'; OTHER='4|other|mine'
 
-PREFIX='#{?#{==:#{@claude_attn},input},#[bg=red#,fg=white#,bold],#{?#{==:#{@claude_attn},done},#[bg=blue#,fg=white#,bold],}}'
+PREFIX='#{?#{==:#{@claude_attn},input},#[bg=#d70000#,fg=#ffffff#,bold],#{?#{==:#{@claude_attn},done},#[bg=#005fd7#,fg=#ffffff#,bold],}}'
 check "window-status-format = colour prefix + your own format" test "$(T show -gwv window-status-format)" = "$PREFIX$USER_FMT"
 check "window-status-current-format = colour prefix + your own format" test "$(T show -gwv window-status-current-format)" = "$PREFIX$USER_CUR"
 check "hooks in slots 71/72 of session-window-changed" test "$(T show-hooks -g 2>/dev/null | grep -c 'session-window-changed\[7[12]\]')" = 2
@@ -834,6 +837,19 @@ check "  ... entry blue" wait_for blue "$THREAD"
 check "another tmux server's session on the same pane id: no colour" is_attn other ""
 check "  ... entry plain" plain "$OTHER"
 check "a registry file whose pid is gone: ignored" test "$(attn solo)" = ""
+
+# A client without true colour: tmux uses the nearest of the 256 colours. For the default hex
+# styles these are the same colours: red 160 (#d70000), blue 26 (#005fd7), white 231 (#ffffff).
+red256() { test "$(sgr_at "$1")" = "fg=38;5;231 bg=48;5;160 bold=1"; }
+blue256() { test "$(sgr_at "$1")" = "fg=38;5;231 bg=48;5;26 bold=1"; }
+reattach() { TO respawn-pane -k -t o:0.0 "env -u TMUX tmux -L $SOCK attach -t t"; wait_for attached; }
+reg "$PA" interactive "t:@99.$PANE_A" a waiting "$(ms)"; tick
+T set -sa terminal-overrides ',*:RGB@:Tc@:setrgbf@:setrgbb@'; reattach
+check "no true colour (RGB off): needs input is colour 160, bold white 231" wait_for red256 "$SOLO"
+check "  ... done is colour 26, bold white 231" wait_for blue256 "$THREAD"
+T set -su terminal-overrides; reattach
+check "  ... RGB back on: true colour again" wait_for red "$SOLO"
+reg "$PA" interactive "t:@99.$PANE_A" a busy "$(ms)"; tick
 
 T run-shell "$SH '$ROOT/main.tmux'"
 check "reload: formats keep one prefix" test "$(T show -gwv window-status-format)" = "$PREFIX$USER_FMT"
