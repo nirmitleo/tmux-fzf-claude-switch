@@ -6,12 +6,13 @@
 #          dialog ("status":"waiting" in its registry file), or a background hub thread that is
 #          blocked (its job state). Clears as soon as the session works again.
 #   done   a session finished its turn (busy -> idle) while you were not looking at that window.
-#          Clears when you open the window.
+#          Clears when you open the window, or when that session works again or exits.
 #   unset  nothing to show. Needs input wins over done when a window has both.
 #
 # The source is Claude's own registry: ~/.claude/sessions/<pid>.json (status, statusUpdatedAt,
 # kind, tmux "session:@window.%pane", name, jobId) and, for background sessions,
-# ~/.claude/jobs/<jobId>/state.json (state, tempo). An interactive session maps to the window of
+# ~/.claude/jobs/<jobId>/state.json (tempo "blocked" on a permission prompt, state "blocked" when
+# the thread ended its turn blocked on a decision). An interactive session maps to the window of
 # its pane. A background session (claude --bg, "tmux":null) maps to every window that has a pane
 # whose @hub_thread option is the session's name (hub tags its attach panes that way).
 #
@@ -79,7 +80,13 @@ tick() {
   local want_pid=${1:-} panes first sessions jobs="" out line word
   local pid kind st sua started pane name job key t live="" need="" needkeys="" cache=""
   local -a cmds jf
-  panes=$(tmux list-panes -a -F "P${TAB}#{pane_id}${TAB}#{pane_tty}${TAB}#{window_id}${TAB}#{window_active}${TAB}#{session_attached}${TAB}#{@claude_attn}${TAB}#{@claude_attn_seen}${TAB}#{@hub_thread}${TAB}#{@claude_attn_pid}" 2>/dev/null) || return 1
+  if ! panes=$(tmux list-panes -a -F "P${TAB}#{pane_id}${TAB}#{pane_tty}${TAB}#{window_id}${TAB}#{window_active}${TAB}#{session_attached}${TAB}#{@claude_attn}${TAB}#{@claude_attn_seen}${TAB}#{@hub_thread}${TAB}#{@claude_attn_pid}" 2>/dev/null) || [ -z "$panes" ]; then
+    # No session yet ("no current target"): tpm loads the plugin from the config before the first
+    # session exists. The server answers show-option then; a dead server does not.
+    first=$(tmux show-option -gqv @claude_attn_pid 2>/dev/null) || return 1
+    [ -z "$want_pid" ] || [ "$first" = "$want_pid" ] || return 1
+    return 0
+  fi
   if [ -n "$want_pid" ]; then
     first=${panes%%$'\n'*}
     [ "${first##*"$TAB"}" = "$want_pid" ] || return 1

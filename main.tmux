@@ -209,10 +209,10 @@ function set_attn {
 	fi
 
 	# Opening a window clears its done colour at once (no wait for the next check), then a check
-	# records that you saw it.
+	# records that you saw it. No output and exit 0, or the pane would go into view-mode.
 	for hook in $attn_hooks; do
 		tmux set-hook -g "${hook}[$attn_hook_slot]" "if-shell -F '#{==:#{@claude_attn},done}' 'set-option -wu @claude_attn'"
-		tmux set-hook -g "${hook}[$((attn_hook_slot + 1))]" "run-shell -b '\"$script\" --tick'"
+		tmux set-hook -g "${hook}[$((attn_hook_slot + 1))]" "run-shell -b '\"$script\" --tick >/dev/null 2>&1 || true'"
 	done
 	"$script" --start
 }

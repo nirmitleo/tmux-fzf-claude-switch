@@ -777,6 +777,7 @@ key 1
 check "opening the window clears done at once (hook, no loop tick)" wait_for is_attn solo ""
 check "  ... and records that you saw it" wait_for seen_is solo "$SUA"
 check "  ... current entry is plain" wait_for plain '1|solo|cur'
+check "  ... the pane is not in view-mode (the hook printed nothing)" test -z "$(T display -p -t t:solo '#{pane_mode}')"
 key 0; tick
 check "after leaving, done does not come back" is_attn solo ""
 
@@ -875,6 +876,14 @@ L3=$LOOP
 T kill-server 2>/dev/null
 TO kill-server 2>/dev/null
 check "server killed: its loop exits" wait_for gone "${L3:-none}"
+# tpm loads the plugin from the config, before the first session exists
+printf '%s\n' 'set -g @fzf-claude-attn-interval 0.3' "run-shell \"$SH '$ROOT/main.tmux'\"" 'run-shell "sleep 1"' >"$TMP/cold.conf"
+tmux -L "$SOCK" -f "$TMP/cold.conf" new-session -d -s t 2>/dev/null
+sleep 1.5
+L4=$(T show -gqv @claude_attn_pid)
+check "plugin loaded from the config before any session: the loop keeps running" kill -0 "${L4:-none}"
+T kill-server 2>/dev/null
+check "  ... and exits with its server" wait_for gone "${L4:-none}"
 leaked() { test -z "$(ps ax -o command= | grep -F "$ATTN --loop" | grep -v grep)"; }
 check "no loop left from any test server" wait_for leaked
 

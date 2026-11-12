@@ -153,7 +153,7 @@ The window list in the status bar (`8:cc-hub-coord` ...) shows which windows nee
 | Colour | Meaning | Clears when |
 |--------|---------|-------------|
 | yellow | a Claude session in the window waits on you: a permission prompt, a question (AskUserQuestion) or another dialog; or a background hub thread is blocked | the session works again (you answered) |
-| green | a Claude session in the window finished its turn while you were not looking at the window | you open the window |
+| green | a Claude session in the window finished its turn while you were not looking at the window | you open the window (also when that session starts working again or exits) |
 
 When one window has both, yellow wins. A session that finishes in the window you are looking at does
 not turn it green. Only the window-list entry changes: no pane borders, pane titles or window names.
@@ -163,8 +163,10 @@ settings.
 **How it works.** Claude Code keeps a registry file for each live session,
 `~/.claude/sessions/<pid>.json` (or `$CLAUDE_CONFIG_DIR/sessions`). It holds the session's `status`:
 `busy`, `idle`, or `waiting` with `waitingFor` (for example `"permission prompt"` or
-`"input needed"`), plus `statusUpdatedAt`. A background session (`claude --bg`) also has
-`~/.claude/jobs/<jobId>/state.json`, where `state` or `tempo` is `blocked` when it needs you.
+`"input needed"`), plus `statusUpdatedAt`. A background session (`claude --bg`) writes the same
+`waiting` on a permission prompt, and also has `~/.claude/jobs/<jobId>/state.json`: `tempo` is
+`blocked` on a prompt, and `state` is `blocked` when the thread ended its turn blocked on a decision.
+All of these were seen on Claude Code 2.1.322.
 `scripts/claude_attn.sh` reads these files in one loop per tmux server (every 2 seconds, started by
 the plugin) and sets the window option `@claude_attn` to `input`, `done`, or unsets it.
 
