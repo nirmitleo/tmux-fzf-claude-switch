@@ -153,10 +153,14 @@ The window list in the status bar (`8:cc-hub-coord` ...) shows which windows nee
 | Colour | Meaning | Clears when |
 |--------|---------|-------------|
 | red `#d70000` (bold white text) | a Claude session in the window waits on you: a permission prompt, a question (AskUserQuestion) or another dialog; or a background hub thread is blocked | the session works again (you answered) |
-| blue `#005fd7` (bold white text) | a Claude session in the window finished its turn while you were not looking at the window | you open the window (also when that session starts working again or exits) |
+| blue `#005fd7` (bold white text) | a Claude session in the window finished its turn while you were not looking at the window, and no other session in it is still working | you open the window (also when any session in it starts working again, or that session exits) |
 
-When one window has both, red wins. A session that finishes in the window you are looking at does
-not turn it blue. Both colours stand out on the default green status bar. Only the window-list
+When one window has both, red wins. A window where any session still works shows no blue, even
+when another session in it finished: a hub coordinator window also holds its threads' attach
+panes, so a coordinator reply does not turn it blue while a thread works. Blue shows when the last
+one finishes. "Works" is status `busy`, or `shell`: the turn ended with a background Bash or
+Monitor still running (a background subagent keeps its parent `busy`). A session that finishes in
+the window you are looking at does not turn it blue. Both colours stand out on the default green status bar. Only the window-list
 entry changes: no pane borders, pane titles or window names.
 
 The defaults are hex colours, not the named `red` and `blue`. A terminal theme can redraw a named
@@ -170,7 +174,7 @@ settings.
 
 **How it works.** Claude Code keeps a registry file for each live session,
 `~/.claude/sessions/<pid>.json` (or `$CLAUDE_CONFIG_DIR/sessions`). It holds the session's `status`:
-`busy`, `idle`, or `waiting` with `waitingFor` (for example `"permission prompt"` or
+`busy`, `idle`, `shell` (the turn ended, a background Bash or Monitor still runs), or `waiting` with `waitingFor` (for example `"permission prompt"` or
 `"input needed"`), plus `statusUpdatedAt`. A background session (`claude --bg`) writes the same
 `waiting` on a permission prompt, and also has `~/.claude/jobs/<jobId>/state.json`: `tempo` is
 `blocked` on a prompt, and `state` is `blocked` when the thread ended its turn blocked on a decision.
@@ -185,7 +189,9 @@ the plugin) and sets the window option `@claude_attn` to `input`, `done`, or uns
   whose `@hub_thread` option is the session's name. hub sets that option on the attach panes it opens.
 - "Done" needs no history: each window keeps `@claude_attn_seen`, the newest `statusUpdatedAt` of its
   sessions the last time you had the window in view (the active window of a session with a client
-  attached). A window is blue when one of its sessions is idle with a newer time than that. A
+  attached). A window is blue when one of its sessions is idle with a newer time than that and no
+  session in it is `busy` or `shell` (a `shell` hub thread whose job `state` is `done` does not
+  count: it left a task behind, such as a server or an artifact watch). A
   session that is idle since start-up is never "done". When the plugin starts, idle sessions do not
   turn blue.
 - Hooks on `session-window-changed`, `client-session-changed` and `client-attached` (slots 71 and 72
@@ -252,7 +258,7 @@ an attached client, the hub tag, that resolved hub projects get no special treat
 with the real fzf too when it is installed), `ctrl-s`, the
 `Ctrl+K` `l` tidy key with stub hubs against a fake `CLAUDE_CONFIG_DIR`, and the window colours
 (stand-in Claude processes in panes with a fake registry: the exact hex red and blue (bold) on the
-rendered status line, colours 160 and 26 without true colour, clearing on work and on a real
+rendered status line, colours 160 and 26 without true colour, no blue while another session in the window works, clearing on work and on a real
 `prefix` + window key, hub thread attach panes, other-server pane ids, your formats kept, reloads, opt-out, no loop left behind). Every test server reads an empty
 `CLAUDE_CONFIG_DIR`, never your real `~/.claude`. Run it with both bashes, since tmux
 `run-shell` may use macOS's bash 3.2:

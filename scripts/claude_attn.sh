@@ -5,9 +5,13 @@
 #   input  a session waits on you: a permission prompt, a question (AskUserQuestion) or another
 #          dialog ("status":"waiting" in its registry file), or a background hub thread that is
 #          blocked (its job state). Clears as soon as the session works again.
-#   done   a session finished its turn (busy -> idle) while you were not looking at that window.
-#          Clears when you open the window, or when that session works again or exits.
-#   unset  nothing to show. Needs input wins over done when a window has both.
+#   done   a session finished its turn (busy -> idle) while you were not looking at that window,
+#          and no session in the window is still working. Clears when you open the window, or
+#          when any session in it works again, or when that session exits.
+#   unset  nothing to show. Needs input wins over everything. A window with a session at work
+#          (status busy, or shell: its turn ended with a background Bash or Monitor still
+#          running) shows no done, even when another session in it finished: a coordinator's
+#          window also holds its threads' attach panes. Done shows once the last one finishes.
 #
 # The source is Claude's own registry: ~/.claude/sessions/<pid>.json (status, statusUpdatedAt,
 # kind, tmux "session:@window.%pane", name, jobId) and, for background sessions,
@@ -19,7 +23,8 @@
 # "Done" needs no memory of earlier ticks: each window keeps @claude_attn_seen, the newest
 # statusUpdatedAt of its sessions at the last moment you had the window in view (the active window
 # of a session with a client attached). A window shows done when one of its sessions is idle with a
-# newer statusUpdatedAt than that. A session that went idle at start-up (status change within 3 s
+# newer statusUpdatedAt than that and none is at work (busy or shell; a background session in shell
+# whose job state is done left a task behind and does not count). A session that went idle at start-up (status change within 3 s
 # of startedAt) never counts as done. A window seen for the first time records its current newest
 # value without showing done, so starting the plugin does not turn every idle window blue.
 #
@@ -169,14 +174,21 @@ tick() {
         if (targets == "") continue
         st = sst[i]; j = sjob[i]
         input = (st == "waiting")
+        # Working: in a turn (busy), or the turn ended with a background Bash or Monitor still
+        # running (shell). A background subagent keeps its parent busy.
+        work = (st == "busy" || st == "shell")
         if (skind[i] == "bg" && j != "-") {
           if (jtempo[j] == "blocked") input = 1
-          if (jstate[j] == "blocked" && st == "idle") input = 1
+          if (jstate[j] == "blocked" && (st == "idle" || st == "shell")) input = 1
+          # A finished thread that left a background task behind (a server, an artifact watch)
+          # must not keep its windows quiet for good
+          if (st == "shell" && (jstate[j] == "done" || jstate[j] == "blocked")) work = 0
         }
         n = split(targets, tw, " ")
         for (k = 1; k <= n; k++) {
           w = tw[k]
           if (input) inp[w] = 1
+          if (work) busyw[w] = 1
           if (ssua[i] + 0 > maxsua[w] + 0) maxsua[w] = ssua[i]
           if (st == "idle" && ssua[i] - sstart[i] > 3000 && ssua[i] + 0 > idlemax[w] + 0) idlemax[w] = ssua[i]
         }
@@ -188,6 +200,7 @@ tick() {
         else ns2 = s
         want = ""
         if (inp[w]) want = "input"
+        else if (busyw[w]) want = ""
         else if (!viewed[w] && s != "" && idlemax[w] + 0 > s + 0) want = "done"
         if (want != cur[w]) {
           if (want == "") print "set-option -wu -t " w " @claude_attn"

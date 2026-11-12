@@ -688,7 +688,7 @@ echo "== attention colours in the window list (claude_attn.sh)"
 # redrew because the option changed, not because of a timer.
 ATTN="$ROOT/scripts/claude_attn.sh"
 ACFG="$TMP/attn-claude"
-mkdir -p "$ACFG/sessions" "$ACFG/jobs/job1"
+mkdir -p "$ACFG/sessions" "$ACFG/jobs/job1" "$ACFG/jobs/job2"
 ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
 T kill-server 2>/dev/null
 TO kill-server 2>/dev/null
@@ -726,7 +726,9 @@ reg() { # reg <pid> <kind> <tmux value|null> <name> <status> <statusUpdatedAt> [
   printf '{"pid":%s,"sessionId":"s-%s","kind":"%s","tmux":%s,"name":"%s","nameSource":"peer","status":"%s","statusUpdatedAt":%s,"startedAt":%s%s}\n' \
     "$1" "$1" "$2" "$tm" "$4" "$5" "$6" "${7:-1000}" "${8:-}" >"$ACFG/sessions/$1.json"
 }
-job() { printf '{\n  "state": "%s",\n  "detail": "stand-in",\n  "tempo": "%s",\n  "name": "cc-hub--t1"\n}\n' "$1" "$2" >"$ACFG/jobs/job1/state.json"; }
+job() { # job <state> <tempo> [job id, default job1]
+  printf '{\n  "state": "%s",\n  "detail": "stand-in",\n  "tempo": "%s",\n  "name": "stand-in"\n}\n' "$1" "$2" >"$ACFG/jobs/${3:-job1}/state.json"
+}
 OLD=$(($(ms) - 600000))
 # A's tmux value names a window it is no longer in (@99): the pane decides, not the stored window
 reg "$PA" interactive "t:@99.$PANE_A" a idle "$OLD"
@@ -818,7 +820,10 @@ reg "$PC" interactive "t:@2.$PANE_C" c idle "$(ms)"; tick
 check "one window with needs input + done: needs input wins" is_attn pair input
 check "  ... entry red" wait_for red "$PAIR"
 reg "$PB" interactive "t:@2.$PANE_B" b busy "$(ms)"; tick
-check "  ... input answered: the other session's done shows" is_attn pair done
+check "  ... input answered, that session works: no done while it works" is_attn pair ""
+check "  ... entry plain" wait_for plain "$PAIR"
+reg "$PB" interactive "t:@2.$PANE_B" b idle "$(ms)"; tick
+check "  ... it finishes too: done" is_attn pair done
 check "  ... entry blue" wait_for blue "$PAIR"
 key 2
 check "  ... opening the window clears it" wait_for is_attn pair ""
@@ -837,6 +842,49 @@ check "  ... entry blue" wait_for blue "$THREAD"
 check "another tmux server's session on the same pane id: no colour" is_attn other ""
 check "  ... entry plain" plain "$OTHER"
 check "a registry file whose pid is gone: ignored" test "$(attn solo)" = ""
+
+# A hub coordinator window: the coordinator's own pane (interactive) and the attach pane of one of
+# its background threads (@hub_thread). The coordinator replies (idle) while the thread still works.
+T new-window -d -t t: -n coord "$(standin "$TMP/pid-f")"
+T split-window -d -t t:coord
+T set -p -t t:coord.1 @hub_thread cc-hub--t2
+wait_for test -s "$TMP/pid-f"; PF=$(cat "$TMP/pid-f"); PANE_F=$(pane_of t:coord.0)
+sleep 600 & PG=$!; disown "$PG"; SLEEPERS="$SLEEPERS $PG" # the thread (no tty)
+COORD='5|coord|mine'
+gone_pid() { ! kill -0 "$1" 2>/dev/null; }
+reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord idle "$OLD"
+reg "$PG" bg null cc-hub--t2 busy "$OLD" 1000 ',"jobId":"job2"'; job working active job2; tick
+check "coordinator window (coordinator + thread attach pane): no colour at first" is_attn coord ""
+reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord idle "$(ms)"; tick
+check "coordinator finished, its thread still busy in the same window: no done" is_attn coord ""
+check "  ... entry plain" wait_for plain "$COORD"
+reg "$PG" bg null cc-hub--t2 idle "$(ms)" 1000 ',"jobId":"job2"'; job done idle job2; tick
+check "  ... the thread finishes too: done" is_attn coord done
+check "  ... entry blue" wait_for blue "$COORD"
+reg "$PG" bg null cc-hub--t2 busy "$(ms)" 1000 ',"jobId":"job2"'; job working active job2; tick
+check "a blue window clears when any session in it starts working" is_attn coord ""
+reg "$PG" bg null cc-hub--t2 shell "$(ms)" 1000 ',"jobId":"job2"'; job working idle job2
+reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord idle "$(ms)"; tick
+check "thread ended its turn with a background task running (status shell): no done" is_attn coord ""
+job done idle job2; tick
+check "  ... shell, but its job is done (a task left behind): done" is_attn coord done
+job blocked idle job2; tick
+check "  ... shell with job state blocked: needs input" is_attn coord input
+reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord waiting "$(ms)"
+reg "$PG" bg null cc-hub--t2 busy "$(ms)" 1000 ',"jobId":"job2"'; job working active job2; tick
+check "coordinator waits on you while the thread works: needs input" is_attn coord input
+check "  ... entry red" wait_for red "$COORD"
+reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord idle "$(ms)"; tick
+check "  ... answered and finished, thread still busy: no done" is_attn coord ""
+kill "$PG" 2>/dev/null; wait_for gone_pid "$PG"; tick
+check "  ... the busy thread's process is gone: done" is_attn coord done
+reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord shell "$(ms)"; tick
+check "an interactive session with a background task (status shell): no done" is_attn coord ""
+reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord idle "$(ms)"; tick
+check "  ... its follow-up turn ends (idle): done" is_attn coord done
+key 5
+check "  ... opening the window clears it" wait_for is_attn coord ""
+key 0
 
 # A client without true colour: tmux uses the nearest of the 256 colours. For the default hex
 # styles these are the same colours: red 160 (#d70000), blue 26 (#005fd7), white 231 (#ffffff).
