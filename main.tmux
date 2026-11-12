@@ -33,6 +33,29 @@ tmux_claude_option_hub_without_prefix="@fzf-claude-hub-without-prefix"
 default_tidy_key="l"
 tmux_claude_option_tidy_key="@fzf-claude-tidy-key"
 
+# Attention colours: a window's entry in the window list turns yellow while a Claude session in it
+# needs input, and green when one finished its turn while you were not looking (until you open the
+# window). scripts/claude_attn.sh keeps the window option @claude_attn (input | done | unset);
+# here a conditional style for it goes in front of window-status-format and
+# window-status-current-format, so your own formats stay as they are after it.
+#   @fzf-claude-attn              on | off   off stops it all and takes the style back out
+#   @fzf-claude-attn-format       on | off   off keeps @claude_attn up to date but leaves the
+#                                            formats alone (use #{@claude_attn} in your own)
+#   @fzf-claude-attn-input-style  default "bg=yellow,fg=black"
+#   @fzf-claude-attn-done-style   default "bg=black,fg=green" (the default status bar is green)
+#   @fzf-claude-attn-interval     seconds between checks, default 2
+tmux_claude_option_attn="@fzf-claude-attn"
+tmux_claude_option_attn_format="@fzf-claude-attn-format"
+tmux_claude_option_attn_input_style="@fzf-claude-attn-input-style"
+tmux_claude_option_attn_done_style="@fzf-claude-attn-done-style"
+default_attn_input_style="bg=yellow,fg=black"
+default_attn_done_style="bg=black,fg=green"
+# The prefix this plugin put in front of the formats last time, so a reload can take it out again
+attn_applied_option="@fzf-claude-attn-applied"
+# Fixed slots in these hook arrays: a reload replaces our entries and leaves your own hooks alone
+attn_hooks="session-window-changed client-session-changed client-attached"
+attn_hook_slot=71
+
 get_tmux_option() {
 	local option=$1
 	local default_value=$2
@@ -143,9 +166,61 @@ function set_tidy_bindings {
 	tmux bind -T "$chord_table" "$key" run-shell -b "\"$CURRENT_DIR/scripts/hub_tidy.sh\" '#{client_name}' '#{pane_id}'"
 }
 
+# Puts <prefix> in front of a global window format, after taking out the prefix of an earlier load
+function attn_apply_format {
+	local option=$1 prefix=$2 old current
+	old=$(tmux show-option -gqv "$attn_applied_option")
+	current=$(tmux show-option -gwv "$option")
+	if [ -n "$old" ]; then
+		case "$current" in
+			"$old"*) current=${current#"$old"} ;;
+		esac
+	fi
+	[ "$prefix$current" = "$(tmux show-option -gwv "$option")" ] || tmux set-option -gw "$option" "$prefix$current"
+}
+
+function set_attn {
+	local enabled=$(get_tmux_option "$tmux_claude_option_attn" on)
+	local format=$(get_tmux_option "$tmux_claude_option_attn_format" on)
+	local script="$CURRENT_DIR/scripts/claude_attn.sh"
+	local prefix="" input_style done_style hook
+
+	if [ "$enabled" != off ] && [ "$format" != off ]; then
+		input_style=$(get_tmux_option "$tmux_claude_option_attn_input_style" "$default_attn_input_style")
+		done_style=$(get_tmux_option "$tmux_claude_option_attn_done_style" "$default_attn_done_style")
+		# A comma inside #{?...} must be written #,
+		prefix="#{?#{==:#{@claude_attn},input},#[${input_style//,/#,}],#{?#{==:#{@claude_attn},done},#[${done_style//,/#,}],}}"
+	fi
+	attn_apply_format window-status-format "$prefix"
+	attn_apply_format window-status-current-format "$prefix"
+	if [ -n "$prefix" ]; then
+		tmux set-option -g "$attn_applied_option" "$prefix"
+	else
+		tmux set-option -gu "$attn_applied_option"
+	fi
+
+	if [ "$enabled" = off ]; then
+		for hook in $attn_hooks; do
+			tmux set-hook -gu "${hook}[$attn_hook_slot]"
+			tmux set-hook -gu "${hook}[$((attn_hook_slot + 1))]"
+		done
+		"$script" --stop
+		return
+	fi
+
+	# Opening a window clears its done colour at once (no wait for the next check), then a check
+	# records that you saw it. No output and exit 0, or the pane would go into view-mode.
+	for hook in $attn_hooks; do
+		tmux set-hook -g "${hook}[$attn_hook_slot]" "if-shell -F '#{==:#{@claude_attn},done}' 'set-option -wu @claude_attn'"
+		tmux set-hook -g "${hook}[$((attn_hook_slot + 1))]" "run-shell -b '\"$script\" --tick >/dev/null 2>&1 || true'"
+	done
+	"$script" --start
+}
+
 function main {
 	set_goto_session_bindings
 	set_hub_bindings
 	set_tidy_bindings
+	set_attn
 }
 main

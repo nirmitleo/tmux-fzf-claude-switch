@@ -18,6 +18,9 @@ TMP=$(cd "$TMP" && pwd) # TMPDIR often ends in "/", and the plugin sees the cd+p
 PASS=0
 FAIL=0
 SLEEPERS=""
+# Every test server inherits this, so the attention loop (claude_attn.sh, started by main.tmux)
+# reads an empty Claude registry instead of your real ~/.claude
+export CLAUDE_CONFIG_DIR="$TMP/claude-empty"
 
 T() { tmux -L "$SOCK" -f /dev/null "$@"; }
 TO() { tmux -L "$OUTER" -f /dev/null "$@"; }
@@ -677,6 +680,212 @@ sleep 0.3
 check "  ... pane not in view-mode" test -z "$(T display -p -t "$P_THREAD" '#{pane_mode}')"
 rm -f "$TMP/tidy-mode"
 TO kill-server 2>/dev/null
+
+echo "== attention colours in the window list (claude_attn.sh)"
+# Stand-in Claude processes run in panes (an interactive session must run on its pane tty); their
+# registry files are in $ACFG. The loop runs every 60 s here, so each change below comes from an
+# explicit tick or a window-change hook. status-interval 0: a colour on the screen shows that tmux
+# redrew because the option changed, not because of a timer.
+ATTN="$ROOT/scripts/claude_attn.sh"
+ACFG="$TMP/attn-claude"
+mkdir -p "$ACFG/sessions" "$ACFG/jobs/job1"
+ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
+T kill-server 2>/dev/null
+TO kill-server 2>/dev/null
+wait_for T new-session -d -s t -x 120 -y 20 -n home 2>/dev/null
+T set-environment -g CLAUDE_CONFIG_DIR "$ACFG"
+T set -g status-interval 0
+T set -g @fzf-claude-attn-interval 60
+USER_FMT='#I|#W|mine'
+USER_CUR='#[bold]#I|#W|cur'
+T set -gw window-status-format "$USER_FMT"
+T set -gw window-status-current-format "$USER_CUR"
+standin() { printf "sh -c 'echo \$\$ >\"%s\"; exec sleep 600'" "$1"; } # the pane process writes its pid
+T new-window -d -t t: -n solo "$(standin "$TMP/pid-a")"
+T new-window -d -t t: -n pair "$(standin "$TMP/pid-b")"
+T split-window -d -t t:pair "$(standin "$TMP/pid-c")"
+T new-window -d -t t: -n thread # the attach pane of a background hub thread
+T set -p -t t:thread @hub_thread cc-hub--t1
+T new-window -d -t t: -n other
+for f in pid-a pid-b pid-c; do wait_for test -s "$TMP/$f"; done
+check "test windows home solo pair thread other exist" test "$(T list-windows -t t -F '#W' | tr '\n' ' ')" = "home solo pair thread other "
+PA=$(cat "$TMP/pid-a"); PB=$(cat "$TMP/pid-b"); PC=$(cat "$TMP/pid-c")
+pane_of() { T display -p -t "$1" '#{pane_id}'; }
+PANE_A=$(pane_of t:solo.0); PANE_B=$(pane_of t:pair.0); PANE_C=$(pane_of t:pair.1); PANE_OTHER=$(pane_of t:other)
+sleep 600 & PD=$!; disown "$PD"; SLEEPERS="$SLEEPERS $PD" # the background thread (no tty)
+sleep 600 & PE2=$!; disown "$PE2"; SLEEPERS="$SLEEPERS $PE2"
+sh -c 'exit 0' & PDEAD=$!; wait "$PDEAD"
+# The client: an outer server pane attached to the inner server, sitting on window "home"
+TO new-session -d -s o -x 120 -y 20 "env -u TMUX tmux -L $SOCK attach -t t"
+TO new-window -d -t o "$(standin "$TMP/pid-e1")" # a process on a tty of another tmux server
+wait_for test -s "$TMP/pid-e1"; PE1=$(cat "$TMP/pid-e1")
+
+reg() { # reg <pid> <kind> <tmux value|null> <name> <status> <statusUpdatedAt> [startedAt] [extra json]
+  local tm=$3
+  [ "$tm" = null ] || tm="\"$tm\""
+  printf '{"pid":%s,"sessionId":"s-%s","kind":"%s","tmux":%s,"name":"%s","nameSource":"peer","status":"%s","statusUpdatedAt":%s,"startedAt":%s%s}\n' \
+    "$1" "$1" "$2" "$tm" "$4" "$5" "$6" "${7:-1000}" "${8:-}" >"$ACFG/sessions/$1.json"
+}
+job() { printf '{\n  "state": "%s",\n  "detail": "stand-in",\n  "tempo": "%s",\n  "name": "cc-hub--t1"\n}\n' "$1" "$2" >"$ACFG/jobs/job1/state.json"; }
+OLD=$(($(ms) - 600000))
+# A's tmux value names a window it is no longer in (@99): the pane decides, not the stored window
+reg "$PA" interactive "t:@99.$PANE_A" a idle "$OLD"
+reg "$PB" interactive "t:@2.$PANE_B" b idle "$OLD"
+reg "$PC" interactive "t:@2.$PANE_C" c idle "$OLD"
+reg "$PD" bg null cc-hub--t1 idle "$OLD" 1000 ',"jobId":"job1"'
+job working idle
+reg "$PE1" interactive "x:@1.$PANE_OTHER" e1 waiting "$(ms)"
+reg "$PE2" interactive "x:@1.$PANE_OTHER" e2 waiting "$(ms)"
+reg "$PDEAD" interactive "t:@1.$PANE_A" dead waiting "$(ms)"
+
+T run-shell "$SH '$ROOT/main.tmux'"
+wait_for attached || bad "inner client did not attach"
+ATMUX="$(T display -p '#{socket_path}'),$(T display -p '#{pid}'),0"
+tick() { env TMUX="$ATMUX" CLAUDE_CONFIG_DIR="$ACFG" "$SH" "$ATTN" --tick; }
+attn() { T show-option -wqv -t "t:$1" @claude_attn; }
+is_attn() { test "$(attn "$1")" = "$2"; }
+seen() { T show-option -wqv -t "t:$1" @claude_attn_seen; }
+seen_is() { test "$(seen "$1")" = "$2"; }
+status_line() { TO capture-pane -e -p -t o | tail -n 1; }
+sgr_before() { status_line | perl -ne 'print $1 if /((?:\e\[[0-9;]*m)+)\Q'"$1"'\E/'; } # escapes just before a label
+yellow() { contains "$(sgr_before "$1")" 43m; }
+green() { local s; s=$(sgr_before "$1"); contains "$s" 32m && contains "$s" 40m; }
+plain() { local s; s=$(sgr_before "$1"); lacks "$s" 43m && lacks "$s" 40m; }
+key() { TO send-keys -t o C-b "$1"; sleep 0.3; } # a real prefix + <n> through the client
+SOLO='1|solo|mine'; PAIR='2|pair|mine'; THREAD='3|thread|mine'; OTHER='4|other|mine'
+
+PREFIX='#{?#{==:#{@claude_attn},input},#[bg=yellow#,fg=black],#{?#{==:#{@claude_attn},done},#[bg=black#,fg=green],}}'
+check "window-status-format = colour prefix + your own format" test "$(T show -gwv window-status-format)" = "$PREFIX$USER_FMT"
+check "window-status-current-format = colour prefix + your own format" test "$(T show -gwv window-status-current-format)" = "$PREFIX$USER_CUR"
+check "hooks in slots 71/72 of session-window-changed" test "$(T show-hooks -g 2>/dev/null | grep -c 'session-window-changed\[7[12]\]')" = 2
+tick
+check "first check: no colour on any window" test -z "$(attn solo)$(attn pair)$(attn thread)$(attn other)"
+check "  ... each window recorded its newest status time" seen_is solo "$OLD"
+check "  ... status line shows the entries plain" plain "$SOLO"
+
+reg "$PA" interactive "t:@99.$PANE_A" a waiting "$(ms)"; tick
+check "needs input (status waiting): @claude_attn=input" is_attn solo input
+check "  ... entry is yellow on the status line" wait_for yellow "$SOLO"
+check "  ... only that entry" plain "$PAIR"
+reg "$PA" interactive "t:@99.$PANE_A" a busy "$(ms)"; tick
+check "answered (status busy): input clears" is_attn solo ""
+check "  ... entry back to plain" wait_for plain "$SOLO"
+SUA=$(ms); reg "$PA" interactive "t:@99.$PANE_A" a idle "$SUA"; tick
+check "finished (idle) in a window you are not on: @claude_attn=done" is_attn solo done
+check "  ... entry is green (green on black)" wait_for green "$SOLO"
+key 1
+check "opening the window clears done at once (hook, no loop tick)" wait_for is_attn solo ""
+check "  ... and records that you saw it" wait_for seen_is solo "$SUA"
+check "  ... current entry is plain" wait_for plain '1|solo|cur'
+check "  ... the pane is not in view-mode (the hook printed nothing)" test -z "$(T display -p -t t:solo '#{pane_mode}')"
+key 0; tick
+check "after leaving, done does not come back" is_attn solo ""
+
+key 1
+reg "$PA" interactive "t:@99.$PANE_A" a busy "$(ms)"; tick
+reg "$PA" interactive "t:@99.$PANE_A" a idle "$(ms)"; tick
+check "finished while you look at the window: no done" is_attn solo ""
+key 0; tick
+check "  ... and none after you leave" is_attn solo ""
+reg "$PA" interactive "t:@99.$PANE_A" a waiting "$(ms)"; key 1; tick
+check "needs input still shows on the current window" is_attn solo input
+check "  ... current entry yellow" wait_for yellow '1|solo|cur'
+key 0
+NOW=$(ms); reg "$PA" interactive "t:@99.$PANE_A" a idle "$NOW" "$((NOW - 40))"; tick
+check "a session that is idle since start-up is not done" is_attn solo ""
+
+reg "$PB" interactive "t:@2.$PANE_B" b waiting "$(ms)"
+reg "$PC" interactive "t:@2.$PANE_C" c idle "$(ms)"; tick
+check "one window with needs input + done: needs input wins" is_attn pair input
+check "  ... entry yellow" wait_for yellow "$PAIR"
+reg "$PB" interactive "t:@2.$PANE_B" b busy "$(ms)"; tick
+check "  ... input answered: the other session's done shows" is_attn pair done
+check "  ... entry green" wait_for green "$PAIR"
+key 2
+check "  ... opening the window clears it" wait_for is_attn pair ""
+key 0
+
+reg "$PD" bg null cc-hub--t1 idle "$(ms)" 1000 ',"jobId":"job1"'; job blocked idle; tick
+check "hub thread blocked (job state): its attach pane window needs input" is_attn thread input
+check "  ... entry yellow" wait_for yellow "$THREAD"
+reg "$PD" bg null cc-hub--t1 busy "$(ms)" 1000 ',"jobId":"job1"'; job working active; tick
+check "  ... thread works again: clears" is_attn thread ""
+job working blocked; tick
+check "hub thread on a permission prompt (job tempo blocked): needs input" is_attn thread input
+reg "$PD" bg null cc-hub--t1 idle "$(ms)" 1000 ',"jobId":"job1"'; job done idle; tick
+check "hub thread finished: done" is_attn thread done
+check "  ... entry green" wait_for green "$THREAD"
+check "another tmux server's session on the same pane id: no colour" is_attn other ""
+check "  ... entry plain" plain "$OTHER"
+check "a registry file whose pid is gone: ignored" test "$(attn solo)" = ""
+
+T run-shell "$SH '$ROOT/main.tmux'"
+check "reload: formats keep one prefix" test "$(T show -gwv window-status-format)" = "$PREFIX$USER_FMT"
+T set -g @fzf-claude-attn-input-style 'bg=red'
+T run-shell "$SH '$ROOT/main.tmux'"
+fmt=$(T show -gwv window-status-format)
+check "new input style: the old prefix is replaced, not stacked" test "$(printf '%s' "$fmt" | grep -o '@claude_attn' | wc -l | tr -d ' ')" = 2
+check "  ... new style in it, your format after it" contains "$fmt" "#[bg=red],#{?"
+check "  ... your format still at the end" test "${fmt%"$USER_FMT"}" != "$fmt"
+T set -gu @fzf-claude-attn-input-style
+T set -g @fzf-claude-attn-format off
+T run-shell "$SH '$ROOT/main.tmux'"
+check "@fzf-claude-attn-format off: formats are exactly yours" test "$(T show -gwv window-status-format)|$(T show -gwv window-status-current-format)" = "$USER_FMT|$USER_CUR"
+reg "$PA" interactive "t:@99.$PANE_A" a waiting "$(ms)"; tick
+check "  ... @claude_attn is still kept up to date" is_attn solo input
+T set -gu @fzf-claude-attn-format
+T set -g @fzf-claude-attn-interval 0.3
+# The loop writes @claude_attn_pid a moment after main.tmux returns: wait for a new, live pid
+LOOP=""
+new_loop() { # new_loop <previous pid>: sets LOOP once @claude_attn_pid names another live process
+  local p
+  p=$(T show -gqv @claude_attn_pid 2>/dev/null)
+  [ -n "$p" ] && [ "$p" != "$1" ] && kill -0 "$p" 2>/dev/null && LOOP=$p
+}
+gone() { ! kill -0 "$1" 2>/dev/null; }
+L0=$(T show -gqv @claude_attn_pid)
+check "the loop started by main.tmux runs" kill -0 "${L0:-none}"
+T run-shell "$SH '$ROOT/main.tmux'"
+check "format on again: prefix back" test "$(T show -gwv window-status-format)" = "$PREFIX$USER_FMT"
+check "reload: a new loop (pid in @claude_attn_pid)" wait_for new_loop "$L0"
+L1=$LOOP
+check "  ... the old loop is stopped at once, though it sleeps 60 s" wait_for gone "${L0:-none}"
+reg "$PA" interactive "t:@99.$PANE_A" a busy "$(ms)"
+check "  ... and updates on its own (input clears without a manual tick)" wait_for is_attn solo ""
+reg "$PA" interactive "t:@99.$PANE_A" a waiting "$(ms)"
+check "  ... and sets it again" wait_for is_attn solo input
+T run-shell "$SH '$ROOT/main.tmux'"
+check "reload again: another new loop" wait_for new_loop "$L1"
+L2=$LOOP
+check "  ... the old one exits" wait_for gone "${L1:-none}"
+check "  ... one loop for this server" test "$(ps ax -o command= | grep -F "$ATTN --loop" | grep -vc grep)" = 1
+
+T set -g @fzf-claude-attn off
+T run-shell "$SH '$ROOT/main.tmux'"
+check "@fzf-claude-attn off: formats are exactly yours again" test "$(T show -gwv window-status-format)|$(T show -gwv window-status-current-format)" = "$USER_FMT|$USER_CUR"
+check "  ... hooks removed" test "$(T show-hooks -g 2>/dev/null | grep -c '\[7[12]\]')" = 0
+check "  ... @claude_attn removed from every window" test -z "$(T list-windows -a -F '#{@claude_attn}' | tr -d '\n')"
+check "  ... the loop exits" wait_for gone "${L2:-none}"
+check "  ... @claude_attn_pid unset" test -z "$(T show -gqv @claude_attn_pid)"
+reg "$PA" interactive "t:@99.$PANE_A" a waiting "$(ms)"; sleep 0.8
+check "  ... nothing sets a colour any more" is_attn solo ""
+T set -gu @fzf-claude-attn
+T run-shell "$SH '$ROOT/main.tmux'"
+check "on again: loop back" wait_for new_loop "$L2"
+L3=$LOOP
+T kill-server 2>/dev/null
+TO kill-server 2>/dev/null
+check "server killed: its loop exits" wait_for gone "${L3:-none}"
+# tpm loads the plugin from the config, before the first session exists
+printf '%s\n' 'set -g @fzf-claude-attn-interval 0.3' "run-shell \"$SH '$ROOT/main.tmux'\"" 'run-shell "sleep 1"' >"$TMP/cold.conf"
+tmux -L "$SOCK" -f "$TMP/cold.conf" new-session -d -s t 2>/dev/null
+sleep 1.5
+L4=$(T show -gqv @claude_attn_pid)
+check "plugin loaded from the config before any session: the loop keeps running" kill -0 "${L4:-none}"
+T kill-server 2>/dev/null
+check "  ... and exits with its server" wait_for gone "${L4:-none}"
+leaked() { test -z "$(ps ax -o command= | grep -F "$ATTN --loop" | grep -v grep)"; }
+check "no loop left from any test server" wait_for leaked
 
 echo
 echo "$PASS passed, $FAIL failed ($SH: $("$SH" -c 'echo $BASH_VERSION'))"
