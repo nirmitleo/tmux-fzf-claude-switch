@@ -870,6 +870,11 @@ job done idle job2; tick
 check "  ... shell, but its job is done (a task left behind): done" is_attn coord done
 job blocked idle job2; tick
 check "  ... shell with job state blocked: needs input" is_attn coord input
+reg "$PG" bg null cc-hub--t2 idle "$(ms)" 1000 ',"jobId":"job2"'; job done idle job2
+reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord shell "$(ms)"; tick
+check "coordinator with a background task (interactive, status shell), its thread finished: no done" is_attn coord ""
+reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord idle "$(ms)"; tick
+check "  ... the coordinator's follow-up turn ends (idle): done" is_attn coord done
 reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord waiting "$(ms)"
 reg "$PG" bg null cc-hub--t2 busy "$(ms)" 1000 ',"jobId":"job2"'; job working active job2; tick
 check "coordinator waits on you while the thread works: needs input" is_attn coord input
@@ -878,10 +883,6 @@ reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord idle "$(ms)"; tick
 check "  ... answered and finished, thread still busy: no done" is_attn coord ""
 kill "$PG" 2>/dev/null; wait_for gone_pid "$PG"; tick
 check "  ... the busy thread's process is gone: done" is_attn coord done
-reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord shell "$(ms)"; tick
-check "an interactive session with a background task (status shell): no done" is_attn coord ""
-reg "$PF" interactive "t:@5.$PANE_F" cc-hub-coord idle "$(ms)"; tick
-check "  ... its follow-up turn ends (idle): done" is_attn coord done
 key 5
 check "  ... opening the window clears it" wait_for is_attn coord ""
 key 0
