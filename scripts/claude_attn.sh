@@ -21,7 +21,7 @@
 # of a session with a client attached). A window shows done when one of its sessions is idle with a
 # newer statusUpdatedAt than that. A session that went idle at start-up (status change within 3 s
 # of startedAt) never counts as done. A window seen for the first time records its current newest
-# value without showing done, so starting the plugin does not turn every idle window green.
+# value without showing done, so starting the plugin does not turn every idle window blue.
 #
 #   claude_attn.sh --start   start the loop in the background (main.tmux does this)
 #   claude_attn.sh --loop    the loop: one tick every @fzf-claude-attn-interval seconds (default 2)

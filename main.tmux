@@ -33,23 +33,23 @@ tmux_claude_option_hub_without_prefix="@fzf-claude-hub-without-prefix"
 default_tidy_key="l"
 tmux_claude_option_tidy_key="@fzf-claude-tidy-key"
 
-# Attention colours: a window's entry in the window list turns yellow while a Claude session in it
-# needs input, and green when one finished its turn while you were not looking (until you open the
+# Attention colours: a window's entry in the window list turns red while a Claude session in it
+# needs input, and blue when one finished its turn while you were not looking (until you open the
 # window). scripts/claude_attn.sh keeps the window option @claude_attn (input | done | unset);
 # here a conditional style for it goes in front of window-status-format and
 # window-status-current-format, so your own formats stay as they are after it.
 #   @fzf-claude-attn              on | off   off stops it all and takes the style back out
 #   @fzf-claude-attn-format       on | off   off keeps @claude_attn up to date but leaves the
 #                                            formats alone (use #{@claude_attn} in your own)
-#   @fzf-claude-attn-input-style  default "bg=yellow,fg=black"
-#   @fzf-claude-attn-done-style   default "bg=black,fg=green" (the default status bar is green)
+#   @fzf-claude-attn-input-style  default "bg=red,fg=white,bold"
+#   @fzf-claude-attn-done-style   default "bg=blue,fg=white,bold"
 #   @fzf-claude-attn-interval     seconds between checks, default 2
 tmux_claude_option_attn="@fzf-claude-attn"
 tmux_claude_option_attn_format="@fzf-claude-attn-format"
 tmux_claude_option_attn_input_style="@fzf-claude-attn-input-style"
 tmux_claude_option_attn_done_style="@fzf-claude-attn-done-style"
-default_attn_input_style="bg=yellow,fg=black"
-default_attn_done_style="bg=black,fg=green"
+default_attn_input_style="bg=red,fg=white,bold"
+default_attn_done_style="bg=blue,fg=white,bold"
 # The prefix this plugin put in front of the formats last time, so a reload can take it out again
 attn_applied_option="@fzf-claude-attn-applied"
 # Fixed slots in these hook arrays: a reload replaces our entries and leaves your own hooks alone

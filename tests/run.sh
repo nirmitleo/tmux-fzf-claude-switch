@@ -747,14 +747,29 @@ is_attn() { test "$(attn "$1")" = "$2"; }
 seen() { T show-option -wqv -t "t:$1" @claude_attn_seen; }
 seen_is() { test "$(seen "$1")" = "$2"; }
 status_line() { TO capture-pane -e -p -t o | tail -n 1; }
-sgr_before() { status_line | perl -ne 'print $1 if /((?:\e\[[0-9;]*m)+)\Q'"$1"'\E/'; } # escapes just before a label
-yellow() { contains "$(sgr_before "$1")" 43m; }
-green() { local s; s=$(sgr_before "$1"); contains "$s" 32m && contains "$s" 40m; }
-plain() { local s; s=$(sgr_before "$1"); lacks "$s" 43m && lacks "$s" 40m; }
+# sgr_at <label>: the effective style just before a label, replaying every escape from the start of
+# the line ("fg=37 bg=41 bold=1"), so a style that leaks from an earlier entry shows up too
+sgr_at() {
+	status_line | LABEL="$1" perl -ne '
+		next unless /^(.*?)\Q$ENV{LABEL}\E/; my $pre = $1; my ($fg, $bg, $b) = ("", "", 0);
+		while ($pre =~ /\e\[([0-9;]*)m/g) {
+			my @p = split /;/, ($1 eq "" ? "0" : $1);
+			while (@p) { my $c = shift @p;
+				if ($c == 38 || $c == 48) { my $m = shift @p; my @v = splice(@p, 0, $m == 5 ? 1 : 3);
+					my $s = join ";", $c, $m, @v; if ($c == 38) { $fg = $s } else { $bg = $s } }
+				elsif ($c == 0) { ($fg, $bg, $b) = ("", "", 0) } elsif ($c == 1) { $b = 1 } elsif ($c == 22) { $b = 0 }
+				elsif (($c >= 30 && $c <= 37) || $c == 39 || ($c >= 90 && $c <= 97)) { $fg = $c }
+				elsif (($c >= 40 && $c <= 47) || $c == 49 || ($c >= 100 && $c <= 107)) { $bg = $c } } }
+		print "fg=$fg bg=$bg bold=$b"; exit;'
+}
+red() { test "$(sgr_at "$1")" = "fg=37 bg=41 bold=1"; }  # default input style: bg=red,fg=white,bold
+blue() { test "$(sgr_at "$1")" = "fg=37 bg=44 bold=1"; } # default done style: bg=blue,fg=white,bold
+plain() { local s; s=$(sgr_at "$1"); test -n "$s" && lacks "$s" "fg=37 " && lacks "$s" "bg=41 " && lacks "$s" "bg=44 "; }
+closed() { plain "$1" && contains "$(sgr_at "$1")" "bold=0"; } # plain and not bold: nothing leaked in
 key() { TO send-keys -t o C-b "$1"; sleep 0.3; } # a real prefix + <n> through the client
 SOLO='1|solo|mine'; PAIR='2|pair|mine'; THREAD='3|thread|mine'; OTHER='4|other|mine'
 
-PREFIX='#{?#{==:#{@claude_attn},input},#[bg=yellow#,fg=black],#{?#{==:#{@claude_attn},done},#[bg=black#,fg=green],}}'
+PREFIX='#{?#{==:#{@claude_attn},input},#[bg=red#,fg=white#,bold],#{?#{==:#{@claude_attn},done},#[bg=blue#,fg=white#,bold],}}'
 check "window-status-format = colour prefix + your own format" test "$(T show -gwv window-status-format)" = "$PREFIX$USER_FMT"
 check "window-status-current-format = colour prefix + your own format" test "$(T show -gwv window-status-current-format)" = "$PREFIX$USER_CUR"
 check "hooks in slots 71/72 of session-window-changed" test "$(T show-hooks -g 2>/dev/null | grep -c 'session-window-changed\[7[12]\]')" = 2
@@ -765,14 +780,15 @@ check "  ... status line shows the entries plain" plain "$SOLO"
 
 reg "$PA" interactive "t:@99.$PANE_A" a waiting "$(ms)"; tick
 check "needs input (status waiting): @claude_attn=input" is_attn solo input
-check "  ... entry is yellow on the status line" wait_for yellow "$SOLO"
-check "  ... only that entry" plain "$PAIR"
+check "  ... entry is red, bold white text, on the status line" wait_for red "$SOLO"
+check "  ... only that entry" closed "$PAIR"
 reg "$PA" interactive "t:@99.$PANE_A" a busy "$(ms)"; tick
 check "answered (status busy): input clears" is_attn solo ""
 check "  ... entry back to plain" wait_for plain "$SOLO"
 SUA=$(ms); reg "$PA" interactive "t:@99.$PANE_A" a idle "$SUA"; tick
 check "finished (idle) in a window you are not on: @claude_attn=done" is_attn solo done
-check "  ... entry is green (green on black)" wait_for green "$SOLO"
+check "  ... entry is blue, bold white text" wait_for blue "$SOLO"
+check "  ... the style closes: the next entry is plain (no bold or colour leak)" closed "$PAIR"
 key 1
 check "opening the window clears done at once (hook, no loop tick)" wait_for is_attn solo ""
 check "  ... and records that you saw it" wait_for seen_is solo "$SUA"
@@ -789,7 +805,7 @@ key 0; tick
 check "  ... and none after you leave" is_attn solo ""
 reg "$PA" interactive "t:@99.$PANE_A" a waiting "$(ms)"; key 1; tick
 check "needs input still shows on the current window" is_attn solo input
-check "  ... current entry yellow" wait_for yellow '1|solo|cur'
+check "  ... current entry red" wait_for red '1|solo|cur'
 key 0
 NOW=$(ms); reg "$PA" interactive "t:@99.$PANE_A" a idle "$NOW" "$((NOW - 40))"; tick
 check "a session that is idle since start-up is not done" is_attn solo ""
@@ -797,35 +813,35 @@ check "a session that is idle since start-up is not done" is_attn solo ""
 reg "$PB" interactive "t:@2.$PANE_B" b waiting "$(ms)"
 reg "$PC" interactive "t:@2.$PANE_C" c idle "$(ms)"; tick
 check "one window with needs input + done: needs input wins" is_attn pair input
-check "  ... entry yellow" wait_for yellow "$PAIR"
+check "  ... entry red" wait_for red "$PAIR"
 reg "$PB" interactive "t:@2.$PANE_B" b busy "$(ms)"; tick
 check "  ... input answered: the other session's done shows" is_attn pair done
-check "  ... entry green" wait_for green "$PAIR"
+check "  ... entry blue" wait_for blue "$PAIR"
 key 2
 check "  ... opening the window clears it" wait_for is_attn pair ""
 key 0
 
 reg "$PD" bg null cc-hub--t1 idle "$(ms)" 1000 ',"jobId":"job1"'; job blocked idle; tick
 check "hub thread blocked (job state): its attach pane window needs input" is_attn thread input
-check "  ... entry yellow" wait_for yellow "$THREAD"
+check "  ... entry red" wait_for red "$THREAD"
 reg "$PD" bg null cc-hub--t1 busy "$(ms)" 1000 ',"jobId":"job1"'; job working active; tick
 check "  ... thread works again: clears" is_attn thread ""
 job working blocked; tick
 check "hub thread on a permission prompt (job tempo blocked): needs input" is_attn thread input
 reg "$PD" bg null cc-hub--t1 idle "$(ms)" 1000 ',"jobId":"job1"'; job done idle; tick
 check "hub thread finished: done" is_attn thread done
-check "  ... entry green" wait_for green "$THREAD"
+check "  ... entry blue" wait_for blue "$THREAD"
 check "another tmux server's session on the same pane id: no colour" is_attn other ""
 check "  ... entry plain" plain "$OTHER"
 check "a registry file whose pid is gone: ignored" test "$(attn solo)" = ""
 
 T run-shell "$SH '$ROOT/main.tmux'"
 check "reload: formats keep one prefix" test "$(T show -gwv window-status-format)" = "$PREFIX$USER_FMT"
-T set -g @fzf-claude-attn-input-style 'bg=red'
+T set -g @fzf-claude-attn-input-style 'bg=magenta'
 T run-shell "$SH '$ROOT/main.tmux'"
 fmt=$(T show -gwv window-status-format)
 check "new input style: the old prefix is replaced, not stacked" test "$(printf '%s' "$fmt" | grep -o '@claude_attn' | wc -l | tr -d ' ')" = 2
-check "  ... new style in it, your format after it" contains "$fmt" "#[bg=red],#{?"
+check "  ... new style in it, your format after it" contains "$fmt" "#[bg=magenta],#{?"
 check "  ... your format still at the end" test "${fmt%"$USER_FMT"}" != "$fmt"
 T set -gu @fzf-claude-attn-input-style
 T set -g @fzf-claude-attn-format off
