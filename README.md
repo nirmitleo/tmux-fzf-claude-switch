@@ -24,6 +24,8 @@ This is a customized tmux session/window/pane switcher optimized for Claude Code
    - Claude panes that belong to a hub project get a dim `hub:<project>` or `hub:<project>/<thread>` tag
      in the `Ctrl+K` → `c` switcher
    - `Ctrl+K` → `l` runs `hub tidy` for the current pane's project: coordinator left, threads stacked right
+8. **[Window colours](#window-colours-for-claude-sessions)**: a window's entry in the status bar turns
+   yellow when a Claude session in it needs your input, and green when one finished while you were away
 
 ### Why this fork?
 
@@ -144,6 +146,64 @@ pane is not part of a hub project. If hub is missing, or its `hub help` does not
 the message says so (`update hub: hub tidy not available`) and nothing else happens. The key never
 leaves the pane in view-mode, so the next key you press works as usual.
 
+## Window colours for Claude sessions
+
+The window list in the status bar (`8:cc-hub-coord` ...) shows which windows need you:
+
+| Colour | Meaning | Clears when |
+|--------|---------|-------------|
+| yellow | a Claude session in the window waits on you: a permission prompt, a question (AskUserQuestion) or another dialog; or a background hub thread is blocked | the session works again (you answered) |
+| green | a Claude session in the window finished its turn while you were not looking at the window | you open the window |
+
+When one window has both, yellow wins. A session that finishes in the window you are looking at does
+not turn it green. Only the window-list entry changes: no pane borders, pane titles or window names.
+It works for every Claude Code session in tmux, hub or not, and needs no Claude Code hooks or
+settings.
+
+**How it works.** Claude Code keeps a registry file for each live session,
+`~/.claude/sessions/<pid>.json` (or `$CLAUDE_CONFIG_DIR/sessions`). It holds the session's `status`:
+`busy`, `idle`, or `waiting` with `waitingFor` (for example `"permission prompt"` or
+`"input needed"`), plus `statusUpdatedAt`. A background session (`claude --bg`) also has
+`~/.claude/jobs/<jobId>/state.json`, where `state` or `tempo` is `blocked` when it needs you.
+`scripts/claude_attn.sh` reads these files in one loop per tmux server (every 2 seconds, started by
+the plugin) and sets the window option `@claude_attn` to `input`, `done`, or unsets it.
+
+- An interactive session belongs to the window of its pane (the `tmux` value in its registry file).
+  Its process must run on that pane's tty, so a pane with the same id in another tmux server is
+  never coloured.
+- A background session (`"tmux":null`, for example a hub thread) belongs to every window with a pane
+  whose `@hub_thread` option is the session's name. hub sets that option on the attach panes it opens.
+- "Done" needs no history: each window keeps `@claude_attn_seen`, the newest `statusUpdatedAt` of its
+  sessions the last time you had the window in view (the active window of a session with a client
+  attached). A window is green when one of its sessions is idle with a newer time than that. A
+  session that is idle since start-up is never "done". When the plugin starts, idle sessions do not
+  turn green.
+- Hooks on `session-window-changed`, `client-session-changed` and `client-attached` (slots 71 and 72
+  of each hook array, so your own hooks stay) clear green at once when you open a window.
+- The colour goes in front of `window-status-format` and `window-status-current-format` as a
+  conditional style on `@claude_attn`. The rest of your format stays as it is. A reload takes out the
+  old prefix before it adds the new one. A theme that puts its own `#[...]` styles in these formats
+  can override the colour. Then set `@fzf-claude-attn-format off` and use `#{@claude_attn}` in your
+  own format.
+- One check costs 2 tmux commands and one awk pass over the registry files, about 30 ms. `ps` only
+  runs when a new session shows up. It never runs once per window.
+
+Options (set them before the plugin loads, or reload with `prefix + I`):
+
+```bash
+set -g @fzf-claude-attn 'off'                          # turn it all off: formats, hooks, loop
+set -g @fzf-claude-attn-format 'off'                   # keep @claude_attn, leave your formats alone
+set -g @fzf-claude-attn-input-style 'bg=yellow,fg=black'   # default
+set -g @fzf-claude-attn-done-style 'bg=black,fg=green'     # default (the default status bar is green)
+set -g @fzf-claude-attn-interval '2'                   # seconds between checks
+```
+
+Your own format can use the option directly, for example:
+
+```bash
+set -g window-status-format '#{?#{==:#{@claude_attn},input},#[fg=yellow],}#I:#W'
+```
+
 ## Requirements
 
 - [Tmux >= 3.3a](https://github.com/brokenricefilms/tmux-fzf-session-switch/pull/5/files) `pop-up menu`
@@ -180,7 +240,11 @@ the key bindings, `hub_mode.sh` with stub `hub` executables, real `Ctrl+K` `h`/`
 an attached client, the hub tag, that resolved hub projects get no special treatment in the switcher
 (their panes listed normally, `ctrl-r` unbound, no `resolved` text, the removed options ignored;
 with the real fzf too when it is installed), `ctrl-s`, the
-`Ctrl+K` `l` tidy key with stub hubs against a fake `CLAUDE_CONFIG_DIR`. Run it with both bashes, since tmux
+`Ctrl+K` `l` tidy key with stub hubs against a fake `CLAUDE_CONFIG_DIR`, and the window colours
+(stand-in Claude processes in panes with a fake registry: yellow and green on the rendered status
+line, clearing on work and on a real `prefix` + window key, hub thread attach panes, other-server pane
+ids, your formats kept, reloads, opt-out, no loop left behind). Every test server reads an empty
+`CLAUDE_CONFIG_DIR`, never your real `~/.claude`. Run it with both bashes, since tmux
 `run-shell` may use macOS's bash 3.2:
 
 ```bash
